@@ -47,6 +47,13 @@ let backendProcess = null;
  */
 let isUserIdle = false;
 
+/**
+ * Whether the screen is currently locked (Win+L or screensaver lock).
+ * While locked, idle polling is suppressed — the break itself accounts for
+ * the time, so we don't want to double-count it as idle time too.
+ */
+let isScreenLocked = false;
+
 // ── Backend (production only) ─────────────────────────────────────────────────
 
 /**
@@ -77,6 +84,11 @@ function startIdlePolling() {
     setInterval(() => {
         // Only run if the window exists and is ready
         if (!mainWindow || mainWindow.isDestroyed()) return;
+
+        // Suppress idle tracking while the screen is locked.
+        // The break (started by screen-lock) already accounts for this time.
+        // Counting idle on top of a lock-break would double-count inactivity.
+        if (isScreenLocked) return;
 
         const idleSecs = powerMonitor.getSystemIdleTime();
         const nowIdle = idleSecs >= IDLE_THRESHOLD_SECS;
@@ -110,6 +122,48 @@ function startIdlePolling() {
             mainWindow.webContents.send('idle-end');
         }
     }, IDLE_POLL_INTERVAL_MS);
+}
+
+// ── Screen Lock Detection ─────────────────────────────────────────────────────
+
+/**
+ * Listens for OS-level screen lock and unlock events.
+ *
+ * Behaviour:
+ *   - Screen LOCKED  → notify renderer (it will start a break if user is working)
+ *   - Screen UNLOCKED → notify renderer (it will end the break if it was lock-initiated)
+ *
+ * We also flip `isScreenLocked` so the idle poller knows to pause
+ * itself — no point tracking idle time while the user is already on a
+ * lock-break.
+ */
+function startScreenLockDetection() {
+    powerMonitor.on('lock-screen', () => {
+        isScreenLocked = true;
+
+        // If the user was idle when they locked, clear that state.
+        // The lock-break will cover this period going forward.
+        if (isUserIdle) {
+            isUserIdle = false;
+            // Tell renderer to end the idle session cleanly before break starts
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('idle-end');
+            }
+        }
+
+        console.log('[ScreenLock] Screen locked — notifying renderer to start break');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('screen-locked');
+        }
+    });
+
+    powerMonitor.on('unlock-screen', () => {
+        isScreenLocked = false;
+        console.log('[ScreenLock] Screen unlocked — notifying renderer to end break');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('screen-unlocked');
+        }
+    });
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────
@@ -155,7 +209,8 @@ app.whenReady().then(() => {
 
     startBackend();
     createWindow();
-    startIdlePolling(); // begin monitoring system idle time
+    startIdlePolling();        // begin monitoring system idle time
+    startScreenLockDetection(); // begin monitoring screen lock/unlock
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
