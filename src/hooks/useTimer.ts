@@ -1,5 +1,27 @@
+/**
+ * useTimer.ts — Core Time Tracking Hook
+ * -----------------------------------------------
+ * Manages all timer state for the dashboard:
+ *   - Shift status (stopped / working / on_break)
+ *   - Current shift and break data from the backend
+ *   - Computed stats: todayWorked, todayBreakSecs, todayBreaksCount, todayIdleSecs
+ *   - Actions: handleStart, handleBreak, handleStop
+ *
+ * Idle Detection Integration:
+ *   - Listens for 'idle-start' / 'idle-end' events from Electron main process
+ *     (via window.electronAPI, injected by preload.js)
+ *   - On idle-start → calls POST /api/time/idle/start with the real idle timestamp
+ *   - On idle-end   → calls POST /api/time/idle/end
+ *   - Periodically refreshes todayIdleSecs from the backend for the pie chart
+ */
+
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getStatus, startShift, toggleBreak, stopShift, getHistory } from '../api';
+import {
+    getStatus, startShift, toggleBreak, stopShift, getHistory,
+    startIdleSession, endIdleSession, getTodayIdleSecs,
+} from '../api';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type TimerStatus = 'stopped' | 'working' | 'on_break';
 
@@ -10,12 +32,30 @@ export interface HistoryShift {
     breaks: Array<{ id: string; startTime: string; endTime: string | null }>;
 }
 
+// Extend the global Window type to include Electron's preload API
+declare global {
+    interface Window {
+        electronAPI?: {
+            minimize: () => void;
+            maximize: () => void;
+            close: () => void;
+            onIdleStart: (cb: (startTime: string) => void) => void;
+            onIdleEnd: (cb: () => void) => void;
+            removeIdleListeners: () => void;
+        };
+    }
+}
+
+// ── Pure Helpers ──────────────────────────────────────────────────────────────
+
+/** Calculate elapsed seconds between two ISO timestamps (or now if end is null) */
 function calcDuration(start: string, end: string | null): number {
     const s = new Date(start).getTime();
     const e = end ? new Date(end).getTime() : Date.now();
     return Math.floor((e - s) / 1000);
 }
 
+/** Sum up all break durations for a shift (open breaks count to now) */
 function calcTotalBreakSecs(breaks: HistoryShift['breaks']): number {
     return breaks.reduce((acc, b) => {
         if (!b.startTime) return acc;
@@ -23,6 +63,7 @@ function calcTotalBreakSecs(breaks: HistoryShift['breaks']): number {
     }, 0);
 }
 
+/** Format a seconds count as HH:MM:SS */
 export function formatDuration(seconds: number): string {
     if (seconds < 0) seconds = 0;
     const h = Math.floor(seconds / 3600);
@@ -31,7 +72,10 @@ export function formatDuration(seconds: number): string {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// ── Hook ──────────────────────────────────────────────────────────────────────
+
 export function useTimer() {
+    // ── Core shift state ──────────────────────────────────────────────────────
     const [status, setStatus] = useState<TimerStatus>('stopped');
     const [currentShift, setCurrentShift] = useState<HistoryShift | null>(null);
     const [history, setHistory] = useState<HistoryShift[]>([]);
@@ -39,9 +83,18 @@ export function useTimer() {
     const [actionLoading, setActionLoading] = useState(false);
     const [error, setError] = useState('');
 
-    // A simple tick counter that increments every second to force re-renders
+    // ── Idle state ────────────────────────────────────────────────────────────
+    // `closedIdleSecs` = total seconds from all COMPLETED idle sessions (from backend).
+    // `idleSessionStartTime` = start of the CURRENT open idle session (tracked locally).
+    // The two are combined on every tick to produce a smooth real-time idle counter.
+    const [closedIdleSecs, setClosedIdleSecs] = useState(0);
+    const [idleSessionStartTime, setIdleSessionStartTime] = useState<Date | null>(null);
+
+    // ── Tick: forces re-render every second when shift is active ──────────────
     const [tick, setTick] = useState(0);
     const tickRef = useRef<number | null>(null);
+
+    // ── Data Fetching ─────────────────────────────────────────────────────────
 
     const fetchStatus = useCallback(async () => {
         try {
@@ -62,15 +115,31 @@ export function useTimer() {
         try {
             const shifts = await getHistory();
             setHistory(shifts);
-        } catch { }
+        } catch { /* Silently ignore — history is non-critical */ }
     }, []);
 
+    /**
+     * Refresh idle seconds from the backend.
+     * This gives us the total of all CLOSED idle sessions.
+     * The currently open (live) session is tracked locally via idleSessionStartTime.
+     */
+    const fetchIdleSecs = useCallback(async () => {
+        try {
+            const secs = await getTodayIdleSecs();
+            setClosedIdleSecs(secs);
+        } catch { /* Silently ignore — non-critical */ }
+    }, []);
+
+    // Initial load: fetch all data in parallel
     useEffect(() => {
         setLoading(true);
-        Promise.all([fetchStatus(), fetchHistory()]).finally(() => setLoading(false));
-    }, [fetchStatus, fetchHistory]);
+        Promise.all([fetchStatus(), fetchHistory(), fetchIdleSecs()])
+            .finally(() => setLoading(false));
+    }, [fetchStatus, fetchHistory, fetchIdleSecs]);
 
-    // Tick every second to trigger re-renders so inline stats recalculate
+    // ── Per-second Tick ───────────────────────────────────────────────────────
+    // Triggers re-renders so inline stats (work time, break time) update live.
+
     useEffect(() => {
         if (status !== 'stopped' && currentShift) {
             tickRef.current = window.setInterval(() => setTick(t => t + 1), 1000);
@@ -80,12 +149,71 @@ export function useTimer() {
         return () => { if (tickRef.current) clearInterval(tickRef.current); };
     }, [status, currentShift]);
 
-    // ── INLINE STATS: recalculate fresh on every render (every second when active) ──
+    // ── Idle Sync: re-fetch idle secs from backend every 30 seconds ──────────
+    // This ensures the pie chart stays accurate even for long idle sessions.
+
+    useEffect(() => {
+        // Refresh idle secs from backend every 30s when shift is active.
+        // Also runs during on_break so already-closed idle sessions stay accurate.
+        if (status === 'working' || status === 'on_break') {
+            const interval = window.setInterval(fetchIdleSecs, 30_000);
+            return () => clearInterval(interval);
+        }
+    }, [status, fetchIdleSecs]);
+
+    // ── Idle Event Listeners (Electron IPC) ───────────────────────────────────
+    // Only active when a shift is in 'working' state (not on break, not stopped).
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api) return; // Running in browser (dev mode without Electron)
+
+        // Called by Electron when user has been idle for ≥60 seconds
+        api.onIdleStart(async (idleStartTime: string) => {
+            // Only track idle during active work — never during a break
+            if (status !== 'working') return;
+
+            console.log('[Idle] User went idle at:', idleStartTime);
+
+            // Set local start time so the counter ticks every second immediately
+            setIdleSessionStartTime(new Date(idleStartTime));
+
+            // Also persist to backend (fire-and-forget, errors are non-fatal)
+            try {
+                await startIdleSession(idleStartTime);
+            } catch (e) {
+                console.warn('[Idle] Failed to record idle start on server:', e);
+            }
+        });
+
+        // Called by Electron when the user moves their mouse or types again
+        api.onIdleEnd(async () => {
+            console.log('[Idle] User became active again');
+
+            // Clear the local timer — the session is over
+            setIdleSessionStartTime(null);
+
+            // Fetch updated closed total from backend, then persist the session end
+            try {
+                await endIdleSession();
+                await fetchIdleSecs(); // re-sync closed total so counter is accurate
+            } catch (e) {
+                console.warn('[Idle] Failed to record idle end on server:', e);
+            }
+        });
+
+        // Cleanup listeners when component unmounts or status changes
+        return () => api.removeIdleListeners();
+    }, [status, fetchIdleSecs]);
+
+    // ── Computed Stats ────────────────────────────────────────────────────────
+    // Recalculated on every render (every second when shift is active)
+
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const todayStart = startOfToday.getTime();
 
-    // Completed shifts today (for historical work/break time)
+    // Completed shifts today (used for historical totals)
     const completedToday = history.filter(
         s => new Date(s.startTime).getTime() >= todayStart && s.endTime !== null
     );
@@ -97,17 +225,16 @@ export function useTimer() {
         (acc, s) => acc + calcTotalBreakSecs(s.breaks), 0
     );
 
-    // ── BREAK COUNT: use ALL today's shifts in history as ground truth ──
-    // The /history API always returns complete data (5 breaks = 5 in history).
-    // The /status API may only return the latest break, so we DON'T use currentShift.breaks.length.
+    // Break count: use history as ground truth (status API may omit older breaks)
     const breaksCountFromHistory = history
         .filter(s => new Date(s.startTime).getTime() >= todayStart)
         .reduce((acc, s) => acc + s.breaks.length, 0);
 
-    // Optimistic +1: user clicked "Take Break" but server hasn't responded yet (temp ID)
+    // Optimistic +1 for when user clicked "Take Break" but server hasn't yet responded
     const hasOptimisticBreak = !!(currentShift?.breaks.some(b => b.id.startsWith('temp-')));
     const todayBreaksCount = breaksCountFromHistory + (hasOptimisticBreak ? 1 : 0);
 
+    // ── Active shift contribution (recalculated every second via tick) ──────────
     let activeWork = 0;
     let activeBreakSecs = 0;
     let elapsedSecs = 0;
@@ -115,14 +242,24 @@ export function useTimer() {
     if (currentShift) {
         const totalElapsed = calcDuration(currentShift.startTime, null);
         activeBreakSecs = calcTotalBreakSecs(currentShift.breaks);
-
         activeWork = Math.max(0, totalElapsed - activeBreakSecs);
         elapsedSecs = totalElapsed;
     }
 
     const todayWorked = historyWork + activeWork;
     const todayBreakSecs = historyBreakSecs + activeBreakSecs;
-    // todayBreaksCount is already computed above from history
+
+    // ── Idle time: combine closed sessions (from backend) + live active session ──
+    // `closedIdleSecs` = sum of all finished idle sessions fetched from backend.
+    // `liveActiveSecs` = seconds since the current idle session started (if any).
+    // Together they give a smooth second-by-second idle counter, just like
+    // todayWorked / todayBreakSecs are computed on every tick.
+    const liveActiveSecs = idleSessionStartTime
+        ? Math.floor((Date.now() - idleSessionStartTime.getTime()) / 1000)
+        : 0;
+    const todayIdleSecs = closedIdleSecs + liveActiveSecs;
+
+    // ── Actions ───────────────────────────────────────────────────────────────
 
     const handleStart = async () => {
         setError('');
@@ -142,7 +279,7 @@ export function useTimer() {
         if (!currentShift) return;
         setError('');
 
-        // ── Frontend limit check (UX) ──
+        // Enforce the 10-break daily limit on the frontend for instant feedback
         if (status !== 'on_break' && todayBreaksCount >= 10) {
             setError('Only 10 breaks are available for a single day');
             return;
@@ -153,7 +290,15 @@ export function useTimer() {
         const isCurrentlyOnBreak = status === 'on_break';
         const now = new Date().toISOString();
 
-        // ── OPTIMISTIC UPDATE: update UI instantly before API responds ──
+        // ── If going ON break: close any open idle session first ──────────────
+        // This prevents idle time from bleeding into break time.
+        // If the user was idle and then clicked "Take Break", we cap the idle
+        // session right now before the break begins.
+        if (!isCurrentlyOnBreak) {
+            await endIdleSession().catch(() => { /* No open idle session — safe to ignore */ });
+        }
+
+        // Optimistic update: change UI instantly before API responds
         if (isCurrentlyOnBreak) {
             setStatus('working');
             setCurrentShift(prev => {
@@ -178,10 +323,10 @@ export function useTimer() {
             await toggleBreak();
             await fetchStatus();
             await fetchHistory();
+            await fetchIdleSecs(); // refresh idle chart after break state change
         } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Error';
-            setError(msg);
-            // Revert optimistic update on failure
+            setError(e instanceof Error ? e.message : 'Error');
+            // Revert the optimistic update if the API call failed
             await fetchStatus();
             await fetchHistory();
         } finally {
@@ -193,9 +338,13 @@ export function useTimer() {
         setError('');
         setActionLoading(true);
         try {
+            // Close any open idle session before stopping the shift
+            await endIdleSession().catch(() => { /* Already closed or no shift — safe to ignore */ });
+            setIdleSessionStartTime(null); // clear local idle timer
             await stopShift();
             await fetchHistory();
             await fetchStatus();
+            await fetchIdleSecs();
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : 'Error');
         } finally {
@@ -203,7 +352,7 @@ export function useTimer() {
         }
     };
 
-    // Suppress unused variable warning for tick (it's used only to trigger re-renders)
+    // Suppress unused variable warning — tick is only used to trigger re-renders
     void tick;
 
     return {
@@ -219,5 +368,6 @@ export function useTimer() {
         todayWorked,
         todayBreakSecs,
         todayBreaksCount,
+        todayIdleSecs, // real-time idle seconds (increments every second)
     };
 }
