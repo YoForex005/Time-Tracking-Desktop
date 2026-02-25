@@ -36,12 +36,18 @@ export interface HistoryShift {
 declare global {
     interface Window {
         electronAPI?: {
+            // Window controls
             minimize: () => void;
             maximize: () => void;
             close: () => void;
+            // Idle detection
             onIdleStart: (cb: (startTime: string) => void) => void;
             onIdleEnd: (cb: () => void) => void;
             removeIdleListeners: () => void;
+            // Screen lock detection
+            onScreenLocked: (cb: () => void) => void;
+            onScreenUnlocked: (cb: () => void) => void;
+            removeScreenListeners: () => void;
         };
     }
 }
@@ -89,6 +95,13 @@ export function useTimer() {
     // The two are combined on every tick to produce a smooth real-time idle counter.
     const [closedIdleSecs, setClosedIdleSecs] = useState(0);
     const [idleSessionStartTime, setIdleSessionStartTime] = useState<Date | null>(null);
+
+    // ── Screen Lock state ─────────────────────────────────────────────────────
+    // `lockBreakRef` = true when the current break was automatically started by
+    // a screen lock event. Only in this case do we auto-resume work on unlock.
+    // Manual breaks (user clicked "Take Break") leave this as false, so they
+    // are NEVER auto-ended on unlock.
+    const lockBreakRef = useRef(false);
 
     // ── Tick: forces re-render every second when shift is active ──────────────
     const [tick, setTick] = useState(0);
@@ -205,6 +218,66 @@ export function useTimer() {
         // Cleanup listeners when component unmounts or status changes
         return () => api.removeIdleListeners();
     }, [status, fetchIdleSecs]);
+
+    // ── Screen Lock / Unlock Listeners (Electron IPC) ─────────────────────────
+    // When Win+L is pressed:
+    //   • If working → automatically start a break + set lockBreakRef flag
+    // When screen unlocks:
+    //   • If lockBreakRef is set → automatically end the break + clear flag
+    //   • Otherwise (manual break) → do nothing
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api) return;
+
+        api.onScreenLocked(async () => {
+            console.log('[ScreenLock] Screen locked');
+
+            // Only auto-break if the user is currently working (not already on break or stopped)
+            if (status !== 'working') return;
+
+            // Close any open idle session first — the break covers this time now
+            setIdleSessionStartTime(null);
+            await endIdleSession().catch(() => { /* No idle session open — safe to ignore */ });
+
+            // Mark this break as lock-initiated so we know to auto-resume on unlock
+            lockBreakRef.current = true;
+
+            console.log('[ScreenLock] Auto-starting break due to screen lock');
+            try {
+                await toggleBreak();
+                await fetchStatus();
+                await fetchHistory();
+            } catch (e) {
+                console.warn('[ScreenLock] Failed to start break on screen lock:', e);
+                lockBreakRef.current = false; // reset flag if the API call failed
+            }
+        });
+
+        api.onScreenUnlocked(async () => {
+            console.log('[ScreenLock] Screen unlocked');
+
+            // Only auto-resume if THIS break was started by a screen lock
+            if (!lockBreakRef.current) {
+                console.log('[ScreenLock] Break was not lock-initiated — leaving break running');
+                return;
+            }
+
+            // Clear the flag before the API call to avoid double-triggering
+            lockBreakRef.current = false;
+
+            console.log('[ScreenLock] Auto-ending break due to screen unlock');
+            try {
+                await toggleBreak();
+                await fetchStatus();
+                await fetchHistory();
+            } catch (e) {
+                console.warn('[ScreenLock] Failed to end break on screen unlock:', e);
+            }
+        });
+
+        return () => api.removeScreenListeners();
+    }, [status, fetchStatus, fetchHistory]);
 
     // ── Computed Stats ────────────────────────────────────────────────────────
     // Recalculated on every render (every second when shift is active)
