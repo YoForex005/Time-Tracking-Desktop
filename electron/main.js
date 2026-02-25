@@ -15,9 +15,12 @@
  *   - Only fires events during state transitions (start→idle, idle→active)
  */
 
+process.noDeprecation = true; // Hides non-critical node warnings (like url.parse)
+
 const { app, BrowserWindow, ipcMain, powerMonitor } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const tracker = require('./tracking/tracker');
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -190,8 +193,15 @@ function createWindow() {
         : `file://${path.join(__dirname, '../dist/index.html')}`;
 
     mainWindow.loadURL(startUrl);
-    mainWindow.once('ready-to-show', () => mainWindow.show());
-    mainWindow.on('closed', () => { mainWindow = null; });
+    mainWindow.once('ready-to-show', () => {
+        mainWindow.show();
+        // Start silent application tracking
+        tracker.startTracking(mainWindow);
+    });
+    mainWindow.on('closed', () => {
+        tracker.stopTracking();
+        mainWindow = null;
+    });
 }
 
 // ── App Lifecycle ─────────────────────────────────────────────────────────────
@@ -207,6 +217,15 @@ app.whenReady().then(() => {
         else mainWindow.maximize();
     });
 
+    // ── IPC: App Tracker ──────────────────────────────────────────────────────
+    ipcMain.handle('get-app-usage', () => {
+        return tracker.getCurrentData();
+    });
+
+    ipcMain.on('clear-app-usage', () => {
+        tracker.clearTrackingData();
+    });
+
     startBackend();
     createWindow();
     startIdlePolling();        // begin monitoring system idle time
@@ -218,6 +237,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+    tracker.stopTracking();
     if (backendProcess) backendProcess.kill();
     if (process.platform !== 'darwin') app.quit();
 });

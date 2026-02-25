@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "active-win": "^7.7.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

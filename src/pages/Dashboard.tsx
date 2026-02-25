@@ -13,6 +13,7 @@
 
 import { useTimer, formatDuration } from '../hooks/useTimer';
 import type { HistoryShift } from '../hooks/useTimer';
+import { useAppTracker } from '../hooks/useAppTracker';
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -179,6 +180,9 @@ export default function Dashboard({ view }: DashboardProps) {
         handleStart, handleBreak, handleStop,
         todayWorked, todayBreakSecs, todayBreaksCount, todayIdleSecs,
     } = useTimer();
+
+    // Initialize background app tracking sync
+    useAppTracker();
 
     if (loading) {
         return (

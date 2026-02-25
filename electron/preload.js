@@ -70,4 +70,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeAllListeners('screen-locked');
         ipcRenderer.removeAllListeners('screen-unlocked');
     },
+
+    // ── App Tracking (Silent) ────────────────────────────────────────────────
+    onAppTrackerUpdate: (callback) => {
+        ipcRenderer.on('app-tracker-update', (_event, data) => callback(data));
+    },
+    removeAppTrackerListeners: () => {
+        ipcRenderer.removeAllListeners('app-tracker-update');
+    },
+    getAppUsage: () => ipcRenderer.invoke('get-app-usage'),
+    clearAppUsage: () => ipcRenderer.send('clear-app-usage'),
 });
