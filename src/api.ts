@@ -19,14 +19,25 @@ export async function login(email: string, password: string) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Login failed');
-    return data as { token: string; user: { id: string; name: string; email: string } };
+
+    // NOTE: idleThresholdSecs is now returned by the backend (set by admin per user).
+    // We persist it to localStorage so useAppTracker.ts can read it on every poll.
+    if (data.user?.idleThresholdSecs !== undefined) {
+        localStorage.setItem('wf_idle_threshold', String(data.user.idleThresholdSecs));
+    }
+
+    return data as { token: string; user: { id: string; name: string; email: string; idleThresholdSecs: number } };
 }
 
 export async function getStatus() {
     const res = await fetch(`${API_BASE}/time/status`, { headers: authHeaders() });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to get status');
-    return data as { status: 'stopped' | 'working' | 'on_break'; shift: unknown };
+    return data as {
+        status: 'stopped' | 'working' | 'on_break';
+        shift: unknown;
+        idleThresholdSecs: number; // live value — updated by admin in real time
+    };
 }
 
 export async function startShift() {
@@ -116,3 +127,40 @@ export async function getTodayIdleSecs(): Promise<number> {
     return (data as { totalIdleSecs: number }).totalIdleSecs;
 }
 
+/**
+ * Open a Server-Sent Events connection to receive real-time threshold changes.
+ *
+ * The backend pushes an `idle-threshold-changed` event every time an admin
+ * saves a new idleThresholdSecs for this user — arrives in milliseconds.
+ *
+ * EventSource does NOT support custom Authorization headers, so we pass the
+ * token as a query param. The backend auth middleware already accepts this.
+ * EventSource auto-reconnects on network drops.
+ *
+ * @param onThresholdChange  Called with the new threshold (seconds) on change
+ * @returns                  Cleanup function — call on component unmount
+ */
+export function subscribeToThresholdEvents(
+    onThresholdChange: (secs: number) => void
+): () => void {
+    const token = getToken();
+    if (!token) return () => { }; // not logged in
+
+    const url = `${API_BASE}/time/events?token=${encodeURIComponent(token)}`;
+    const source = new EventSource(url);
+
+    source.addEventListener('idle-threshold-changed', (e: MessageEvent) => {
+        try {
+            const { idleThresholdSecs } = JSON.parse(e.data) as { idleThresholdSecs: number };
+            if (typeof idleThresholdSecs === 'number') {
+                onThresholdChange(idleThresholdSecs);
+            }
+        } catch { /* malformed event — ignore */ }
+    });
+
+    source.onerror = () => {
+        // EventSource will auto-reconnect; no action needed
+    };
+
+    return () => source.close();
+}

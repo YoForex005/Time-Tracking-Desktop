@@ -26,8 +26,12 @@ const tracker = require('./tracking/tracker');
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
-/** Seconds of inactivity after which the user is considered idle */
-const IDLE_THRESHOLD_SECS = 60;
+/**
+ * Idle threshold in seconds — mutable so the renderer can push the
+ * admin-configured per-user value after login via the 'set-idle-threshold' IPC.
+ * Default: 60s (matches the previous hardcoded value).
+ */
+let IDLE_THRESHOLD_SECS = 60; // NOTE: updated dynamically via IPC after login
 
 /**
  * How often (ms) we poll the system idle time.
@@ -226,7 +230,15 @@ app.whenReady().then(() => {
         tracker.clearTrackingData();
     });
 
-    startBackend();
+    // ── IPC: Dynamic Idle Threshold (NEW — Admin Portal) ─────────────────────
+    // Called by the renderer after login with the admin-set value for this user.
+    ipcMain.on('set-idle-threshold', (_event, seconds) => {
+        if (typeof seconds === 'number' && seconds >= 10) {
+            IDLE_THRESHOLD_SECS = Math.round(seconds);
+            console.log(`[Idle] Threshold updated by admin to ${IDLE_THRESHOLD_SECS}s`);
+        }
+    });
+
     createWindow();
     startIdlePolling();        // begin monitoring system idle time
     startScreenLockDetection(); // begin monitoring screen lock/unlock
