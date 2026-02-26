@@ -19,6 +19,14 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             const data = await login(email, password);
             localStorage.setItem('wf_token', data.token);
             localStorage.setItem('wf_user', JSON.stringify(data.user));
+
+            // NOTE: Push the admin-configured idle threshold to Electron main process.
+            // This replaces the default 60s constant so idle detection uses the per-user value.
+            const threshold = data.user.idleThresholdSecs ?? 60;
+            if (window.electronAPI && 'setIdleThreshold' in window.electronAPI) {
+                (window.electronAPI as any).setIdleThreshold(threshold);
+            }
+
             onLogin(data.user, data.token);
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Login failed');

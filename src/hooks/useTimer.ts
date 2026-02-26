@@ -19,7 +19,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     getStatus, startShift, toggleBreak, stopShift, getHistory,
     startIdleSession, endIdleSession, getTodayIdleSecs,
+    subscribeToThresholdEvents,
 } from '../api';
+
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -89,6 +91,14 @@ export function useTimer() {
     const [actionLoading, setActionLoading] = useState(false);
     const [error, setError] = useState('');
 
+    // ── Live idle threshold tracking ──────────────────────────────────────────
+    // Seeded from localStorage (set at login) so the ref is correct from the start.
+    // After each status poll, if the backend returns a different value (admin changed
+    // it), we push the new threshold to the Electron main process via IPC.
+    const lastThresholdRef = useRef<number>(
+        parseInt(localStorage.getItem('wf_idle_threshold') ?? '60', 10)
+    );
+
     // ── Idle state ────────────────────────────────────────────────────────────
     // `closedIdleSecs` = total seconds from all COMPLETED idle sessions (from backend).
     // `idleSessionStartTime` = start of the CURRENT open idle session (tracked locally).
@@ -118,11 +128,27 @@ export function useTimer() {
             } else {
                 setCurrentShift(null);
             }
+
+            // ── Live idle threshold sync ──────────────────────────────────────
+            // Detect if admin changed the threshold since the last poll.
+            const newThreshold = data.idleThresholdSecs;
+            if (typeof newThreshold === 'number' && newThreshold !== lastThresholdRef.current) {
+                lastThresholdRef.current = newThreshold;
+                localStorage.setItem('wf_idle_threshold', String(newThreshold));
+                console.log(`[Idle] Admin updated threshold → ${newThreshold}s. Pushing to Electron.`);
+
+                // Push to Electron main process so polling uses the new value immediately
+                const api = window.electronAPI;
+                if (api && 'setIdleThreshold' in api) {
+                    (api as unknown as { setIdleThreshold: (s: number) => void }).setIdleThreshold(newThreshold);
+                }
+            }
         } catch {
             setStatus('stopped');
             setCurrentShift(null);
         }
     }, []);
+
 
     const fetchHistory = useCallback(async () => {
         try {
@@ -173,6 +199,30 @@ export function useTimer() {
             return () => clearInterval(interval);
         }
     }, [status, fetchIdleSecs]);
+
+    // ── Real-time idle threshold sync (SSE) ─────────────────────────────────
+    // Subscribes to the backend SSE stream on mount.
+    // When admin changes a user's idle threshold, the backend pushes an
+    // `idle-threshold-changed` event. This callback fires in milliseconds
+    // and immediately applies the new threshold to Electron's idle poller.
+    useEffect(() => {
+        const unsubscribe = subscribeToThresholdEvents((newThreshold: number) => {
+            // Guard: only act if the value actually changed
+            if (newThreshold === lastThresholdRef.current) return;
+
+            lastThresholdRef.current = newThreshold;
+            localStorage.setItem('wf_idle_threshold', String(newThreshold));
+            console.log(`[Idle] SSE: admin updated threshold → ${newThreshold}s`);
+
+            // Push to Electron main process — idle polling switches to new value instantly
+            const api = window.electronAPI;
+            if (api && 'setIdleThreshold' in api) {
+                (api as unknown as { setIdleThreshold: (s: number) => void }).setIdleThreshold(newThreshold);
+            }
+        });
+
+        return unsubscribe; // closes the EventSource on unmount
+    }, []);
 
     // ── Idle Event Listeners (Electron IPC) ───────────────────────────────────
     // Only active when a shift is in 'working' state (not on break, not stopped).
