@@ -11,6 +11,7 @@
  *   - Idle  (slate  #6366f1)
  */
 
+import { useState } from 'react';
 import { useTimer, formatDuration } from '../hooks/useTimer';
 import type { HistoryShift } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
@@ -78,9 +79,10 @@ function DonutChart({ workedSecs, breakSecs, idleSecs }: DonutChartProps) {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                 <svg width="140" height="140" viewBox="0 0 140 140">
-                    <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="18" />
-                    <text x={cx} y={cy - 6} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize="11" fontWeight="500">No data</text>
-                    <text x={cx} y={cy + 12} textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="10">Check in first</text>
+                    {/* Track ring uses border variable */}
+                    <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth="18" />
+                    <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--text-muted)" fontSize="11" fontWeight="500">No data</text>
+                    <text x={cx} y={cy + 12} textAnchor="middle" fill="var(--text-muted)" fontSize="10">Check in first</text>
                 </svg>
             </div>
         );
@@ -101,8 +103,8 @@ function DonutChart({ workedSecs, breakSecs, idleSecs }: DonutChartProps) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
             <svg width="140" height="140" viewBox="0 0 140 140">
-                {/* Background track */}
-                <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="18" />
+                {/* Background track — uses border variable, visible in both modes */}
+                <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth="18" />
 
                 {/* Work arc — green */}
                 <circle
@@ -138,17 +140,17 @@ function DonutChart({ workedSecs, breakSecs, idleSecs }: DonutChartProps) {
                     />
                 )}
 
-                {/* Center label: work percentage */}
-                <text x={cx} y={cy - 7} textAnchor="middle" fill="white" fontSize="15" fontWeight="700">
+                {/* Center label — use CSS variables for text visibility in both modes */}
+                <text x={cx} y={cy - 7} textAnchor="middle" fill="var(--text-primary)" fontSize="15" fontWeight="700">
                     {workPct}%
                 </text>
-                <text x={cx} y={cy + 10} textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10">
+                <text x={cx} y={cy + 10} textAnchor="middle" fill="var(--text-muted)" fontSize="10">
                     work ratio
                 </text>
             </svg>
 
-            {/* Legend */}
-            <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'rgba(255,255,255,0.65)', flexWrap: 'wrap', justifyContent: 'center' }}>
+            {/* Legend — use CSS variable for label text */}
+            <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-secondary)', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e', display: 'inline-block' }} />
                     Work
@@ -168,6 +170,54 @@ function DonutChart({ workedSecs, breakSecs, idleSecs }: DonutChartProps) {
     );
 }
 
+// ── CheckoutWarningModal ──────────────────────────────────────────────────
+
+interface WarningItem { label: string; actual: string; expected: string; }
+
+function CheckoutWarningModal({
+    warnings, onProceed, onCancel
+}: {
+    warnings: WarningItem[];
+    onProceed: () => void;
+    onCancel:  () => void;
+}) {
+    return (
+        <div className="modal-overlay">
+            <div className="modal">
+                <div className="modal__icon">
+                    ⚠️
+                </div>
+                <h2 className="modal__title">Work criteria not met</h2>
+                <p className="modal__body">You haven't completed the expected work hours for today.</p>
+
+                <div className="modal__warnings">
+                    {warnings.map(w => (
+                        <div key={w.label} className="modal__warning-row">
+                            <span className="modal__warning-label">{w.label}</span>
+                            <span className="modal__warning-vals">
+                                <span className="modal__actual">{w.actual} worked</span>
+                                <span className="modal__sep">/</span>
+                                <span className="modal__expected">{w.expected} expected</span>
+                            </span>
+                        </div>
+                    ))}
+                </div>
+
+                <p className="modal__question">Are you sure you want to check out early?</p>
+
+                <div className="modal__actions">
+                    <button className="modal__btn modal__btn--secondary" onClick={onCancel}>
+                        Keep Working
+                    </button>
+                    <button className="modal__btn modal__btn--danger" onClick={onProceed}>
+                        Check Out Anyway
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 interface DashboardProps {
@@ -179,7 +229,48 @@ export default function Dashboard({ view }: DashboardProps) {
         status, elapsedSecs, history, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
         todayWorked, todayBreakSecs, todayBreaksCount, todayIdleSecs,
+        expectedWorkSecs, expectedActiveSecs,
     } = useTimer();
+
+    // Checkout warning modal
+    const [showWarning,    setShowWarning]    = useState(false);
+    const [warningItems,   setWarningItems]   = useState<{label:string;actual:string;expected:string}[]>([]);
+    const [proceedingStop, setProceedingStop] = useState(false);
+
+    /** Called when user clicks "Check Out" button */
+    const handleCheckoutClick = () => {
+        const activeSecs = Math.max(0, todayWorked - todayIdleSecs);
+        const unmet: {label:string;actual:string;expected:string}[] = [];
+
+        if (todayWorked < expectedWorkSecs) {
+            unmet.push({
+                label:    'Total Work Hours',
+                actual:   formatDuration(todayWorked),
+                expected: formatDuration(expectedWorkSecs),
+            });
+        }
+        if (activeSecs < expectedActiveSecs) {
+            unmet.push({
+                label:    'Active Hours (excl. idle)',
+                actual:   formatDuration(activeSecs),
+                expected: formatDuration(expectedActiveSecs),
+            });
+        }
+
+        if (unmet.length > 0) {
+            setWarningItems(unmet);
+            setShowWarning(true);
+        } else {
+            handleStop(); // All criteria met — proceed immediately
+        }
+    };
+
+    const confirmStop = async () => {
+        setProceedingStop(true);
+        setShowWarning(false);
+        await handleStop();
+        setProceedingStop(false);
+    };
 
     // Initialize background app tracking sync
     useAppTracker();
@@ -194,6 +285,14 @@ export default function Dashboard({ view }: DashboardProps) {
 
     return (
         <div className="main">
+            {/* Checkout warning modal */}
+            {showWarning && (
+                <CheckoutWarningModal
+                    warnings={warningItems}
+                    onProceed={confirmStop}
+                    onCancel={() => setShowWarning(false)}
+                />
+            )}
 
             {/* ── TRACKER VIEW ─────────────────────────────────────────────── */}
             {view === 'tracker' && (
@@ -242,7 +341,7 @@ export default function Dashboard({ view }: DashboardProps) {
                                     <div className="stat-card__label">Breaks Taken</div>
                                     <div className="stat-card__value">
                                         {todayBreaksCount}
-                                        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', fontWeight: 400, marginLeft: 4 }}>/ 10</span>
+                                        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 4 }}>/ 10</span>
                                     </div>
                                 </div>
 
@@ -268,9 +367,11 @@ export default function Dashboard({ view }: DashboardProps) {
                             className="stat-card"
                             style={{ minWidth: 190, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px 16px', gap: 8 }}
                         >
-                            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                                Today's Ratio
-                            </div>
+                            {/* Chart container header */}
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+                            Today's Ratio
+                        </div>
+
                             <DonutChart
                                 workedSecs={todayWorked}
                                 breakSecs={todayBreakSecs}
@@ -334,8 +435,8 @@ export default function Dashboard({ view }: DashboardProps) {
                             <button
                                 id="btn-check-out"
                                 className="btn btn-danger"
-                                onClick={handleStop}
-                                disabled={status === 'stopped' || actionLoading}
+                                onClick={handleCheckoutClick}
+                                disabled={status === 'stopped' || actionLoading || proceedingStop}
                             >
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
