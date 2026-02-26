@@ -1,11 +1,7 @@
 const { execFile } = require('child_process');
-const axios = require('axios');
+
 // ── Configuration ─────────────────────────────────────────────────────────────
 const TRACKING_INTERVAL_MS = 5000; // 5 seconds (faster detection)
-// ── Configuration ─────────────────────────────────────────────────────────────
-; // 5 seconds (faster detection)
-const SYNC_INTERVAL_MS = 10000; // 60 seconds interval for sending data to backend
-const API_BASE = 'http://localhost:5000/api';
 
 // ── Excluded processes (system/noise + unwanted apps) ─────────────────────────
 const EXCLUDED_PROCESSES = [
@@ -13,22 +9,22 @@ const EXCLUDED_PROCESSES = [
     'svchost', 'dwm', 'csrss', 'wininit', 'winlogon', 'fontdrvhost',
     'lsass', 'services', 'registry', 'smss', 'spoolsv', 'unsecapp',
     'wmiprvse', 'dllhost', 'msiexec', 'taskhostw', 'sihost', 'ctfmon',
-
+    
     // Windows UI
     'searchhost', 'shellexperiencehost', 'startmenuexperiencehost',
     'runtimebroker', 'applicationframehost', 'systemsettings',
     'textinputhost', 'lockapp', 'taskmgr',
-
+    
     // Background services
     'backgroundtaskhost', 'searchindexer', 'securityhealthservice',
     'gamebarpresencewriter', 'audiodg', 'smartscreen', 'wudfhost',
     'mobsync', 'dataexchangehost', 'locationnotificationwindows',
     'monotificationux', 'm365copilot', 'widgets',
-
+    
     // Development noise
     'node', 'git', 'npm', 'esbuild', 'language_server', 'conhost',
     'powershell', 'cmd',
-
+    
     // Edge WebView (background)
     'msedgewebview2'
 ];
@@ -172,27 +168,28 @@ function isExcluded(processName) {
     return EXCLUDED_PROCESSES.some(ex => lower.includes(ex));
 }
 
+// ── Clean app name extraction (ACCEPTS ALL APPS NOW) ──────────────────────────
 function getCleanAppName(processName, windowTitle, displayName) {
     const lower = processName.toLowerCase();
-
+    
     // Chrome/Edge - extract website name
     if (lower.includes('chrome') || lower.includes('msedge')) {
         if (!windowTitle) return 'Chrome';
-
+        
         let cleaned = windowTitle
             .replace(/ - Google Chrome$/, '')
             .replace(/ - Microsoft Edge$/, '')
             .trim();
-
+        
         const match = cleaned.match(/^([^-|]+)/);
         if (match) {
             cleaned = match[1].trim();
         }
-
+        
         if (cleaned.length > 50) return 'Chrome';
         return cleaned || 'Chrome';
     }
-
+    
     // Firefox
     if (lower.includes('firefox')) {
         if (!windowTitle) return 'Firefox';
@@ -200,17 +197,17 @@ function getCleanAppName(processName, windowTitle, displayName) {
         if (cleaned.length > 50) return 'Firefox';
         return cleaned || 'Firefox';
     }
-
+    
     // VS Code
     if (lower === 'code') {
         return 'VS Code';
     }
-
+    
     // Antigravity IDE
     if (lower === 'antigravity') {
         return 'Antigravity IDE';
     }
-
+    
     // Brave browser
     if (lower.includes('brave')) {
         if (!windowTitle) return 'Brave';
@@ -218,12 +215,12 @@ function getCleanAppName(processName, windowTitle, displayName) {
         if (cleaned.length > 50) return 'Brave';
         return cleaned || 'Brave';
     }
-
+    
     // Microsoft Store
     if (lower === 'winstore.app' || lower.includes('store')) {
         return 'Microsoft Store';
     }
-
+    
     // Common apps
     if (lower === 'discord') return 'Discord';
     if (lower === 'spotify') return 'Spotify';
@@ -241,24 +238,24 @@ function getCleanAppName(processName, windowTitle, displayName) {
     if (lower === 'winword') return 'Microsoft Word';
     if (lower === 'powerpnt') return 'Microsoft PowerPoint';
     if (lower === 'outlook') return 'Microsoft Outlook';
-
+    
     // If we have a display name (Windows description), use it
     if (displayName && displayName !== processName) {
         return displayName;
     }
-
+    
     // If window title is short and meaningful, use it
     if (windowTitle && windowTitle.length > 0 && windowTitle.length < 60) {
         // Don't use generic titles
         const genericTitles = ['window', 'untitled', 'new', 'blank'];
         const titleLower = windowTitle.toLowerCase();
         const isGeneric = genericTitles.some(g => titleLower.includes(g));
-
+        
         if (!isGeneric) {
             return windowTitle;
         }
     }
-
+    
     // Last resort: capitalize process name
     return processName.charAt(0).toUpperCase() + processName.slice(1);
 }
@@ -272,7 +269,6 @@ async function recordActiveWindow() {
         }
 
         const durationToAdd = TRACKING_INTERVAL_MS / 1000;
-
         const currentSeenPids = new Set();
         const validApps = [];
         let foregroundApp = null;
@@ -285,14 +281,14 @@ async function recordActiveWindow() {
                 console.log(`[Tracker] Skipped (no process/PID): ${JSON.stringify(app)}`);
                 return;
             }
-
+            
             if (isExcluded(app.Process)) {
                 console.log(`[Tracker] Excluded: ${app.Process}`);
                 return;
             }
 
             currentSeenPids.add(app.PID);
-
+            
             // Get clean app name
             const appName = getCleanAppName(app.Process, app.Title, app.DisplayName);
             const originalTitle = app.Title || '';
@@ -314,13 +310,13 @@ async function recordActiveWindow() {
             }
 
             // Add time to this app
-            const existing = usageMap.get(appName) || {
-                seconds: 0,
-                title: originalTitle,
+            const existing = usageMap.get(appName) || { 
+                seconds: 0, 
+                title: originalTitle, 
                 path: app.Path || '',
                 lastSeen: Date.now()
             };
-
+            
             usageMap.set(appName, {
                 seconds: existing.seconds + durationToAdd,
                 title: originalTitle,
@@ -362,26 +358,6 @@ async function recordActiveWindow() {
     }
 }
 
-async function syncDataToBackend(usageArray) {
-    if (!usageArray || usageArray.length === 0) return;
-    console.log(`[Tracker] Syncing ${usageArray.length} apps to backend...`);
-    
-    try {
-        const res = await axios.post(`${API_BASE}/usage/sync`, {
-            usage: usageArray
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                // 'Authorization': `Bearer YOUR_TOKEN_HERE` // Uncomment if backend requires auth
-            }
-        });
-        
-        console.log(`[Tracker] ✓ Sync successful. Status: ${res.status}`);
-    } catch (err) {
-        console.warn(`[Tracker] ❌ Sync failed: ${err.message}`);
-    }
-}
-
 function getUsageArray() {
     return Array.from(usageMap.entries()).map(([name, data]) => ({
         name,
@@ -390,8 +366,6 @@ function getUsageArray() {
         seconds: data.seconds
     })).sort((a, b) => b.seconds - a.seconds);
 }
-
-let lastSyncTime = Date.now(); // Track the last time we synced
 
 function startTracking(mainWindow) {
     if (trackingInterval) return;
@@ -406,26 +380,13 @@ function startTracking(mainWindow) {
 
     trackingInterval = setInterval(async () => {
         const data = await recordActiveWindow();
-        
-        // Update the renderer (frontend)
         if (data && mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('app-tracker-update', data);
         }
-
-        // ── NEW: Sync data to backend periodically ──
-        const now = Date.now();
-        if (now - lastSyncTime >= SYNC_INTERVAL_MS) {
-            lastSyncTime = now;
-            if (data && data.usage && data.usage.length > 0) {
-                syncDataToBackend(data.usage);
-            }
-        }
-        
     }, TRACKING_INTERVAL_MS);
 
     console.log(`[Tracker] ✓ Interval registered`);
 }
-
 
 function stopTracking() {
     if (trackingInterval) {
