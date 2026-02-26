@@ -36,9 +36,12 @@ export async function getStatus() {
     return data as {
         status: 'stopped' | 'working' | 'on_break';
         shift: unknown;
-        idleThresholdSecs: number; // live value — updated by admin in real time
+        idleThresholdSecs:  number; // live value — updated by admin in real time
+        expectedWorkSecs:   number; // org-wide expected shift duration
+        expectedActiveSecs: number; // org-wide expected active (non-idle) duration
     };
 }
+
 
 export async function startShift() {
     const res = await fetch(`${API_BASE}/time/start`, {

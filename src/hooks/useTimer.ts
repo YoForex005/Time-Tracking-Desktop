@@ -99,6 +99,12 @@ export function useTimer() {
         parseInt(localStorage.getItem('wf_idle_threshold') ?? '60', 10)
     );
 
+    // ── Work-time targets (from OrgSettings, delivered via status poll) ────────
+    // Admin sets these in the admin portal. Desktop reads them every poll and
+    // shows a checkout warning if not met.
+    const [expectedWorkSecs, setExpectedWorkSecs] = useState(28800); // 8h default
+    const [expectedActiveSecs, setExpectedActiveSecs] = useState(25200); // 7h default
+
     // ── Idle state ────────────────────────────────────────────────────────────
     // `closedIdleSecs` = total seconds from all COMPLETED idle sessions (from backend).
     // `idleSessionStartTime` = start of the CURRENT open idle session (tracked locally).
@@ -143,6 +149,11 @@ export function useTimer() {
                     (api as unknown as { setIdleThreshold: (s: number) => void }).setIdleThreshold(newThreshold);
                 }
             }
+
+            // ── Keep work-time targets in sync ───────────────────────────────
+            if (typeof data.expectedWorkSecs === 'number') setExpectedWorkSecs(data.expectedWorkSecs);
+            if (typeof data.expectedActiveSecs === 'number') setExpectedActiveSecs(data.expectedActiveSecs);
+
         } catch {
             setStatus('stopped');
             setCurrentShift(null);
@@ -195,10 +206,23 @@ export function useTimer() {
         // Refresh idle secs from backend every 30s when shift is active.
         // Also runs during on_break so already-closed idle sessions stay accurate.
         if (status === 'working' || status === 'on_break') {
-            const interval = window.setInterval(fetchIdleSecs, 30_000);
+            const interval = window.setInterval(fetchIdleSecs, 10_000);
             return () => clearInterval(interval);
         }
     }, [status, fetchIdleSecs]);
+
+    // ── Settings Sync: re-fetch status every 30 seconds ──────────────────────
+    // fetchStatus includes expectedWorkSecs + expectedActiveSecs from OrgSettings.
+    // Without this, the desktop only reads them once on mount and never again,
+    // so admin changes to work time targets would only appear after a user action.
+    // This poll ensures settings propagate within 30 seconds automatically.
+    useEffect(() => {
+        if (status === 'working' || status === 'on_break') {
+            const interval = window.setInterval(fetchStatus, 30_000);
+            return () => clearInterval(interval);
+        }
+    }, [status, fetchStatus]);
+
 
     // ── Real-time idle threshold sync (SSE) ─────────────────────────────────
     // Subscribes to the backend SSE stream on mount.
@@ -491,6 +515,8 @@ export function useTimer() {
         todayWorked,
         todayBreakSecs,
         todayBreaksCount,
-        todayIdleSecs, // real-time idle seconds (increments every second)
+        todayIdleSecs,        // real-time idle seconds (increments every second)
+        expectedWorkSecs,     // org-wide expected total shift length
+        expectedActiveSecs,   // org-wide expected active (non-idle) time
     };
 }
