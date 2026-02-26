@@ -1,39 +1,26 @@
 const { execFile } = require('child_process');
 const axios = require('axios');
-// ── Configuration ─────────────────────────────────────────────────────────────
-const TRACKING_INTERVAL_MS = 5000; // 5 seconds (faster detection)
-// ── Configuration ─────────────────────────────────────────────────────────────
-; // 5 seconds (faster detection)
-const SYNC_INTERVAL_MS = 10000; // 60 seconds interval for sending data to backend
+
+const TRACKING_INTERVAL_MS = 5000;
+const SYNC_INTERVAL_MS = 10000;
 const API_BASE = 'http://localhost:5000/api';
 
-// ── Excluded processes (system/noise + unwanted apps) ─────────────────────────
 const EXCLUDED_PROCESSES = [
-    // System processes
     'svchost', 'dwm', 'csrss', 'wininit', 'winlogon', 'fontdrvhost',
     'lsass', 'services', 'registry', 'smss', 'spoolsv', 'unsecapp',
     'wmiprvse', 'dllhost', 'msiexec', 'taskhostw', 'sihost', 'ctfmon',
-
-    // Windows UI
     'searchhost', 'shellexperiencehost', 'startmenuexperiencehost',
     'runtimebroker', 'applicationframehost', 'systemsettings',
     'textinputhost', 'lockapp', 'taskmgr',
-
-    // Background services
     'backgroundtaskhost', 'searchindexer', 'securityhealthservice',
     'gamebarpresencewriter', 'audiodg', 'smartscreen', 'wudfhost',
     'mobsync', 'dataexchangehost', 'locationnotificationwindows',
     'monotificationux', 'm365copilot', 'widgets',
-
-    // Development noise
     'node', 'git', 'npm', 'esbuild', 'language_server', 'conhost',
     'powershell', 'cmd',
-
-    // Edge WebView (background)
     'msedgewebview2'
 ];
 
-// ── PowerShell script: Get ONLY visible windows + real foreground ─────────────
 const PS_SCRIPT = `
 Add-Type @"
 using System;
@@ -41,55 +28,39 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Collections.Generic;
 public class WinAPI {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [DllImport("user32.dll")]
     public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
-    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-    
+
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
-    
+
     [DllImport("user32.dll")]
     public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-    
+
     [DllImport("user32.dll")]
     public static extern int GetWindowTextLength(IntPtr hWnd);
-    
+
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-    
+
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
-    
-    [DllImport("user32.dll")]
-    public static extern long GetWindowLong(IntPtr hWnd, int nIndex);
-    
-    const int GWL_STYLE = -16;
-    const long WS_VISIBLE = 0x10000000L;
-    const long WS_CAPTION = 0x00C00000L;
 
     public static List<Tuple<uint, IntPtr, string>> GetAllVisibleWindows() {
         var windows = new List<Tuple<uint, IntPtr, string>>();
         EnumWindows((hWnd, lParam) => {
-            // Must be visible
             if (!IsWindowVisible(hWnd)) return true;
-            
-            // Get window style
-            long style = GetWindowLong(hWnd, GWL_STYLE);
-            
-            // Must have caption (title bar) or be visible
-            if ((style & WS_VISIBLE) == 0) return true;
-            
-            // Get title
+
             int length = GetWindowTextLength(hWnd);
             StringBuilder sb = new StringBuilder(length + 1);
             GetWindowText(hWnd, sb, sb.Capacity);
             string title = sb.ToString();
-            
-            // Get process ID
+
             uint procId = 0;
             GetWindowThreadProcessId(hWnd, out procId);
-            
-            // Add to list (even if title is empty - we'll get process name)
+
             windows.Add(new Tuple<uint, IntPtr, string>(procId, hWnd, title));
             return true;
         }, IntPtr.Zero);
@@ -102,55 +73,216 @@ public class WinAPI {
 }
 "@
 
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+function Get-WindowUrl {
+    param([IntPtr]$Hwnd)
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+        if ($null -eq $root) { return $null }
+
+        $condEdit = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit
+        )
+
+        $edits = $root.FindAll([System.Windows.Automation.TreeScope]::Subtree, $condEdit)
+        foreach ($e in $edits) {
+            $name = $e.Current.Name
+            $aid = $e.Current.AutomationId
+
+            $candidate = $false
+            if ($aid -and $aid -match '(?i)address|urlbar') { $candidate = $true }
+            if (-not $candidate -and $name) {
+                if ($name -match '(?i)Address and search bar|Search or enter address|Address bar|Search with|Search or enter web address') { $candidate = $true }
+            }
+            if (-not $candidate) { continue }
+
+            $value = $null
+            try {
+                $vp = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                if ($vp) { $value = $vp.Current.Value }
+            } catch {}
+
+            if (-not $value) {
+                try {
+                    $tp = $e.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+                    if ($tp) { $value = $tp.DocumentRange.GetText(-1) }
+                } catch {}
+            }
+
+            if ($value) {
+                $value = $value.Trim()
+                if ($value.Length -gt 0) { return $value }
+            }
+        }
+    } catch {}
+
+    return $null
+}
+
 $foregroundHwnd = [WinAPI]::GetForeground()
 $foregroundProcId = 0
 [WinAPI]::GetWindowThreadProcessId($foregroundHwnd, [ref]$foregroundProcId) | Out-Null
 
 $windows = [WinAPI]::GetAllVisibleWindows()
 $results = @()
-$seenPids = @{}
 
 foreach ($win in $windows) {
     $procId = $win.Item1
     $hwnd = $win.Item2
     $title = $win.Item3
-    
-    if ($seenPids.ContainsKey($procId)) { continue }
-    $seenPids[$procId] = $true
-    
+
+    if ($procId -eq 0) { continue }
+
     $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
-    if ($proc -eq $null) { continue }
-    
-    # Use process description if available, otherwise process name
-    $displayName = if ($proc.Description) { $proc.Description } else { $proc.ProcessName }
-    
+    if ($null -eq $proc) { continue }
+
+    $path = $null
+    try { $path = $proc.Path } catch {}
+
+    $displayName = $null
+    if ($path) {
+        try {
+            $fvi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+            if ($fvi.ProductName) { $displayName = $fvi.ProductName }
+            elseif ($fvi.FileDescription) { $displayName = $fvi.FileDescription }
+        } catch {}
+    }
+
+    if (-not $displayName) {
+        try { if ($proc.Description) { $displayName = $proc.Description } } catch {}
+    }
+
+    if (-not $displayName) { $displayName = $proc.ProcessName }
+
+    $pname = $proc.ProcessName
+    $url = $null
+    if ($pname -match '^(chrome|msedge|brave|firefox)$') {
+        $url = Get-WindowUrl -Hwnd $hwnd
+    }
+
     $results += [PSCustomObject]@{
-        Process      = $proc.ProcessName
+        Process      = $pname
         DisplayName  = $displayName
         Title        = $title
-        Path         = $proc.Path
-        PID          = $procId
+        Url          = $url
+        Path         = $path
+        PID          = [int]$procId
+        HWND         = $hwnd.ToInt64()
         IsForeground = ($procId -eq $foregroundProcId)
     }
 }
 
-$results | ConvertTo-Json -Compress
+$results | ConvertTo-Json -Compress -Depth 4
 `;
 
-// ── State ─────────────────────────────────────────────────────────────────────
+const APP_NAME_OVERRIDES = {
+    'code': 'VS Code',
+    'winword': 'Microsoft Word',
+    'excel': 'Microsoft Excel',
+    'powerpnt': 'Microsoft PowerPoint',
+    'outlook': 'Microsoft Outlook',
+    'notepad': 'Notepad',
+    'notepad++': 'Notepad++',
+    'vlc': 'VLC Media Player',
+    'steam': 'Steam',
+    'discord': 'Discord',
+    'spotify': 'Spotify',
+    'slack': 'Slack',
+    'telegram': 'Telegram',
+    'whatsapp': 'WhatsApp',
+    'obs64': 'OBS Studio',
+    'obs32': 'OBS Studio',
+    'photoshop': 'Adobe Photoshop',
+    'illustrator': 'Adobe Illustrator',
+    'explorer': 'File Explorer',
+    'chrome': 'Google Chrome',
+    'msedge': 'Microsoft Edge',
+    'brave': 'Brave',
+    'firefox': 'Firefox'
+};
+
 let trackingInterval = null;
 let usageMap = new Map();
 let currentApp = null;
 let lastSeenPids = new Set();
+let lastSyncTime = Date.now();
 
-// ── Fetch all visible windowed apps ───────────────────────────────────────────
+function normalizeProcessName(processName) {
+    if (!processName) return '';
+    return String(processName).replace(/\.exe$/i, '').toLowerCase();
+}
+
+function isExcluded(processName) {
+    const lower = normalizeProcessName(processName);
+    if (!lower) return true;
+    return EXCLUDED_PROCESSES.some(ex => lower.includes(ex));
+}
+
+function cleanDesktopName(name) {
+    if (!name) return '';
+    let n = String(name);
+    n = n.replace(/[®™©]/g, '');
+    n = n.replace(/\((32|64)\s*bit\)/ig, '');
+    n = n.replace(/\s+/g, ' ').trim();
+    n = n.replace(/\s+(19|20)\d{2}\b$/g, '').trim();
+    n = n.replace(/\s+v?\d+(?:\.\d+){1,4}\b$/ig, '').trim();
+    n = n.replace(/\s+/g, ' ').trim();
+    return n;
+}
+
+function getDesktopAppName(processName, displayName) {
+    const p = normalizeProcessName(processName);
+    if (APP_NAME_OVERRIDES[p]) return APP_NAME_OVERRIDES[p];
+    const cleaned = cleanDesktopName(displayName || processName);
+    if (cleaned) return cleaned;
+    if (!p) return 'Unknown';
+    return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+function isBrowserProcess(processName) {
+    const p = normalizeProcessName(processName);
+    return p === 'chrome' || p === 'msedge' || p === 'brave' || p === 'firefox';
+}
+
+function getBrowserFallback(processName) {
+    const p = normalizeProcessName(processName);
+    return APP_NAME_OVERRIDES[p] || 'Browser';
+}
+
+function normalizeUrl(rawUrl) {
+    if (!rawUrl) return '';
+    let s = String(rawUrl).trim();
+    if (!s) return '';
+
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) {
+        if (/^[^\s]+\.[^\s]+$/.test(s) || /^localhost(?::\d+)?(\/|$)/i.test(s)) {
+            s = `https://${s}`;
+        }
+    }
+
+    try {
+        const u = new URL(s);
+        u.hash = '';
+        u.search = '';
+        return u.toString();
+    } catch (_) {
+        return s;
+    }
+}
+
 function getRunningApps() {
-    return new Promise((resolve) => {
-        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_SCRIPT],
-            { timeout: 8000 },
+    return new Promise(resolve => {
+        execFile(
+            'powershell.exe',
+            ['-NoProfile', '-NonInteractive', '-STA', '-Command', PS_SCRIPT],
+            { timeout: 12000, windowsHide: true, maxBuffer: 1024 * 1024 * 4 },
             (err, stdout, stderr) => {
                 if (err || !stdout || !stdout.trim()) {
-                    if (stderr) console.warn('[Tracker] PS stderr:', stderr.trim());
+                    if (stderr && String(stderr).trim()) console.log('[Tracker] PowerShell stderr:', String(stderr).trim());
+                    if (err) console.log('[Tracker] PowerShell error:', err.message);
                     return resolve([]);
                 }
                 try {
@@ -158,7 +290,7 @@ function getRunningApps() {
                     if (!Array.isArray(data)) data = [data];
                     resolve(data);
                 } catch (e) {
-                    console.warn('[Tracker] Parse error:', e.message);
+                    console.log('[Tracker] PowerShell JSON parse error:', e.message);
                     resolve([]);
                 }
             }
@@ -166,237 +298,131 @@ function getRunningApps() {
     });
 }
 
-function isExcluded(processName) {
-    if (!processName) return true;
-    const lower = processName.toLowerCase();
-    return EXCLUDED_PROCESSES.some(ex => lower.includes(ex));
-}
-
-function getCleanAppName(processName, windowTitle, displayName) {
-    const lower = processName.toLowerCase();
-
-    // Chrome/Edge - extract website name
-    if (lower.includes('chrome') || lower.includes('msedge')) {
-        if (!windowTitle) return 'Chrome';
-
-        let cleaned = windowTitle
-            .replace(/ - Google Chrome$/, '')
-            .replace(/ - Microsoft Edge$/, '')
-            .trim();
-
-        const match = cleaned.match(/^([^-|]+)/);
-        if (match) {
-            cleaned = match[1].trim();
-        }
-
-        if (cleaned.length > 50) return 'Chrome';
-        return cleaned || 'Chrome';
+function getKeyForApp(app) {
+    const proc = normalizeProcessName(app.Process);
+    if (isBrowserProcess(proc)) {
+        const url = normalizeUrl(app.Url);
+        return url || getBrowserFallback(proc);
     }
-
-    // Firefox
-    if (lower.includes('firefox')) {
-        if (!windowTitle) return 'Firefox';
-        let cleaned = windowTitle.replace(/ - Mozilla Firefox$/, '').trim();
-        if (cleaned.length > 50) return 'Firefox';
-        return cleaned || 'Firefox';
-    }
-
-    // VS Code
-    if (lower === 'code') {
-        return 'VS Code';
-    }
-
-    // Antigravity IDE
-    if (lower === 'antigravity') {
-        return 'Antigravity IDE';
-    }
-
-    // Brave browser
-    if (lower.includes('brave')) {
-        if (!windowTitle) return 'Brave';
-        let cleaned = windowTitle.replace(/ - Brave$/, '').trim();
-        if (cleaned.length > 50) return 'Brave';
-        return cleaned || 'Brave';
-    }
-
-    // Microsoft Store
-    if (lower === 'winstore.app' || lower.includes('store')) {
-        return 'Microsoft Store';
-    }
-
-    // Common apps
-    if (lower === 'discord') return 'Discord';
-    if (lower === 'spotify') return 'Spotify';
-    if (lower === 'slack') return 'Slack';
-    if (lower === 'telegram') return 'Telegram';
-    if (lower === 'whatsapp') return 'WhatsApp';
-    if (lower === 'notepad') return 'Notepad';
-    if (lower === 'notepad++') return 'Notepad++';
-    if (lower === 'vlc') return 'VLC Media Player';
-    if (lower === 'steam') return 'Steam';
-    if (lower === 'obs64' || lower === 'obs32') return 'OBS Studio';
-    if (lower === 'photoshop') return 'Photoshop';
-    if (lower === 'illustrator') return 'Illustrator';
-    if (lower === 'excel') return 'Microsoft Excel';
-    if (lower === 'winword') return 'Microsoft Word';
-    if (lower === 'powerpnt') return 'Microsoft PowerPoint';
-    if (lower === 'outlook') return 'Microsoft Outlook';
-
-    // If we have a display name (Windows description), use it
-    if (displayName && displayName !== processName) {
-        return displayName;
-    }
-
-    // If window title is short and meaningful, use it
-    if (windowTitle && windowTitle.length > 0 && windowTitle.length < 60) {
-        // Don't use generic titles
-        const genericTitles = ['window', 'untitled', 'new', 'blank'];
-        const titleLower = windowTitle.toLowerCase();
-        const isGeneric = genericTitles.some(g => titleLower.includes(g));
-
-        if (!isGeneric) {
-            return windowTitle;
-        }
-    }
-
-    // Last resort: capitalize process name
-    return processName.charAt(0).toUpperCase() + processName.slice(1);
+    return getDesktopAppName(proc, app.DisplayName);
 }
 
 async function recordActiveWindow() {
     try {
         const apps = await getRunningApps();
         if (!apps || apps.length === 0) {
-            console.log('[Tracker] No apps detected');
+            console.log('[Tracker] No windows detected');
             return null;
         }
 
+        console.log('[Tracker] Windows detected:', apps.length);
+
         const durationToAdd = TRACKING_INTERVAL_MS / 1000;
+        const now = Date.now();
 
         const currentSeenPids = new Set();
-        const validApps = [];
+        const seenKeysThisPoll = new Set();
+        const openKeys = [];
+
         let foregroundApp = null;
 
-        console.log(`[Tracker] Raw apps detected: ${apps.length}`);
+        for (const app of apps) {
+            if (!app || !app.Process || !app.PID) continue;
+            if (isExcluded(app.Process)) continue;
 
-        // Process current apps
-        apps.forEach(app => {
-            if (!app.Process || !app.PID) {
-                console.log(`[Tracker] Skipped (no process/PID): ${JSON.stringify(app)}`);
-                return;
-            }
-
-            if (isExcluded(app.Process)) {
-                console.log(`[Tracker] Excluded: ${app.Process}`);
-                return;
-            }
+            const key = getKeyForApp(app);
+            if (!key) continue;
 
             currentSeenPids.add(app.PID);
 
-            // Get clean app name
-            const appName = getCleanAppName(app.Process, app.Title, app.DisplayName);
-            const originalTitle = app.Title || '';
-
-            console.log(`[Tracker] Detected: ${app.Process} → ${appName} (Foreground: ${app.IsForeground})`);
-
-            // Track foreground app
-            if (app.IsForeground) {
+            if (app.IsForeground && !foregroundApp) {
                 foregroundApp = {
-                    name: appName,
-                    title: originalTitle,
+                    name: key,
+                    title: app.Title || '',
                     path: app.Path || '',
-                    owner: app.Process,
+                    owner: normalizeProcessName(app.Process),
                     pid: app.PID,
-                    timestamp: Date.now()
+                    timestamp: now
                 };
-                currentApp = foregroundApp;
-                console.log(`[Tracker] ✓ Foreground set: ${appName}`);
             }
 
-            // Add time to this app
-            const existing = usageMap.get(appName) || {
+            if (seenKeysThisPoll.has(key)) continue;
+            seenKeysThisPoll.add(key);
+            openKeys.push(key);
+
+            const existing = usageMap.get(key) || {
                 seconds: 0,
-                title: originalTitle,
+                title: app.Title || '',
                 path: app.Path || '',
-                lastSeen: Date.now()
+                lastSeen: now
             };
 
-            usageMap.set(appName, {
+            usageMap.set(key, {
                 seconds: existing.seconds + durationToAdd,
-                title: originalTitle,
-                path: app.Path || '',
-                lastSeen: Date.now()
+                title: app.Title || existing.title || '',
+                path: app.Path || existing.path || '',
+                lastSeen: now
             });
 
-            validApps.push(appName);
-        });
-
-        // Clean up closed apps (not seen for 30 seconds)
-        const now = Date.now();
-        for (const [appName, data] of usageMap.entries()) {
-            if (now - data.lastSeen > 30000) {
-                console.log(`[Tracker] Removed closed app: ${appName}`);
-                usageMap.delete(appName);
+            if (isBrowserProcess(app.Process) && !app.Url) {
+                console.log('[Tracker] Browser URL missing:', normalizeProcessName(app.Process), 'Title:', app.Title || '');
             }
+        }
+
+        currentApp = foregroundApp;
+
+        for (const [key, data] of usageMap.entries()) {
+            if (now - data.lastSeen > 30000) usageMap.delete(key);
         }
 
         lastSeenPids = currentSeenPids;
 
-        if (validApps.length > 0) {
-            console.log(`[Tracker] ═══════════════════════════════════`);
-            console.log(`[Tracker] Open apps (${validApps.length}): ${validApps.join(', ')}`);
-            console.log(`[Tracker] Foreground: ${foregroundApp ? foregroundApp.name : '❌ NONE'}`);
-            console.log(`[Tracker] ═══════════════════════════════════`);
-        } else {
-            console.log(`[Tracker] ⚠️ No valid apps found!`);
-        }
+        console.log('[Tracker] Open items:', openKeys.length);
+        if (openKeys.length) console.log('[Tracker] Items:', openKeys.join(', '));
+        console.log('[Tracker] Foreground:', foregroundApp ? foregroundApp.name : 'NONE');
 
         return {
             active: currentApp,
             usage: getUsageArray()
         };
-
     } catch (err) {
-        console.warn('[Tracker] Error:', err.message);
+        console.log('[Tracker] Error:', err.message);
         return null;
     }
 }
 
-async function syncDataToBackend(usageArray) {
-    if (!usageArray || usageArray.length === 0) return;
-    console.log(`[Tracker] Syncing ${usageArray.length} apps to backend...`);
-    
+async function syncDataToBackend(data) {
+    if (!data || !data.usage) return;
+
+    console.log('[Tracker] Syncing to backend');
+
     try {
-        const res = await axios.post(`${API_BASE}/usage/sync`, {
-            usage: usageArray
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                // 'Authorization': `Bearer YOUR_TOKEN_HERE` // Uncomment if backend requires auth
-            }
-        });
-        
-        console.log(`[Tracker] ✓ Sync successful. Status: ${res.status}`);
+        await axios.post(
+            `${API_BASE}/usage/sync`,
+            { active: data.active, usage: data.usage },
+            { headers: { 'Content-Type': 'application/json' } }
+        );
+        console.log('[Tracker] Sync success');
     } catch (err) {
-        console.warn(`[Tracker] ❌ Sync failed: ${err.message}`);
+        console.log('[Tracker] Sync failed:', err.message);
     }
 }
 
 function getUsageArray() {
-    return Array.from(usageMap.entries()).map(([name, data]) => ({
-        name,
-        title: data.title,
-        path: data.path,
-        seconds: data.seconds
-    })).sort((a, b) => b.seconds - a.seconds);
+    return Array.from(usageMap.entries())
+        .map(([name, data]) => ({
+            name,
+            title: data.title,
+            path: data.path,
+            seconds: data.seconds
+        }))
+        .sort((a, b) => b.seconds - a.seconds);
 }
-
-let lastSyncTime = Date.now(); // Track the last time we synced
 
 function startTracking(mainWindow) {
     if (trackingInterval) return;
 
-    console.log(`[Tracker] 🚀 Started polling every ${TRACKING_INTERVAL_MS / 1000}s`);
+    console.log('[Tracker] Started polling every', TRACKING_INTERVAL_MS / 1000, 'seconds');
 
     recordActiveWindow().then(data => {
         if (data && mainWindow && !mainWindow.isDestroyed()) {
@@ -406,47 +432,37 @@ function startTracking(mainWindow) {
 
     trackingInterval = setInterval(async () => {
         const data = await recordActiveWindow();
-        
-        // Update the renderer (frontend)
+
         if (data && mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('app-tracker-update', data);
         }
 
-        // ── NEW: Sync data to backend periodically ──
         const now = Date.now();
         if (now - lastSyncTime >= SYNC_INTERVAL_MS) {
             lastSyncTime = now;
-            if (data && data.usage && data.usage.length > 0) {
-                syncDataToBackend(data.usage);
-            }
+            if (data && data.usage && data.usage.length > 0) syncDataToBackend(data);
         }
-        
     }, TRACKING_INTERVAL_MS);
 
-    console.log(`[Tracker] ✓ Interval registered`);
+    console.log('[Tracker] Interval registered');
 }
 
-
 function stopTracking() {
-    if (trackingInterval) {
-        clearInterval(trackingInterval);
-        trackingInterval = null;
-        console.log('[Tracker] 🛑 Stopped.');
-    }
+    if (!trackingInterval) return;
+    clearInterval(trackingInterval);
+    trackingInterval = null;
+    console.log('[Tracker] Stopped');
 }
 
 function clearTrackingData() {
     usageMap.clear();
     currentApp = null;
     lastSeenPids.clear();
-    console.log('[Tracker] 🗑️ Data cleared');
+    console.log('[Tracker] Data cleared');
 }
 
 function getCurrentData() {
-    return {
-        active: currentApp,
-        usage: getUsageArray()
-    };
+    return { active: currentApp, usage: getUsageArray() };
 }
 
 module.exports = {
