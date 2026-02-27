@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     getAppUsage: () => ipcRenderer.invoke('get-app-usage'),
     clearAppUsage: () => ipcRenderer.send('clear-app-usage'),
+    setTrackerAuthToken: (token) => ipcRenderer.send('set-tracker-auth-token', token),
+    clearTrackerAuthToken: () => ipcRenderer.send('clear-tracker-auth-token'),
 
     // ── Idle Threshold (NEW — Admin Portal) ──────────────────────────────────
     // Called by the renderer after login to push the admin-set per-user threshold

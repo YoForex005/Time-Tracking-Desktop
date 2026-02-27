@@ -307,6 +307,15 @@ app.whenReady().then(() => {
         tracker.clearTrackingData();
     });
 
+    ipcMain.on('set-tracker-auth-token', (_event, token) => {
+        if (typeof token !== 'string') return;
+        tracker.setAuthToken(token);
+    });
+
+    ipcMain.on('clear-tracker-auth-token', () => {
+        tracker.clearAuthToken();
+    });
+
     // ── IPC: Dynamic Idle Threshold (NEW — Admin Portal) ─────────────────────
     // Called by the renderer after login with the admin-set value for this user.
     ipcMain.on('set-idle-threshold', (_event, seconds) => {
