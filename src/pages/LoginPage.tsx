@@ -20,6 +20,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             localStorage.setItem('wf_token', data.token);
             localStorage.setItem('wf_user', JSON.stringify(data.user));
 
+            // Push JWT to Electron main process so background usage sync can be
+            // authenticated and attributed to this user immediately.
+            if (window.electronAPI && 'setTrackerAuthToken' in window.electronAPI) {
+                (window.electronAPI as any).setTrackerAuthToken(data.token);
+            }
+
             // NOTE: Push the admin-configured idle threshold to Electron main process.
             // This replaces the default 60s constant so idle detection uses the per-user value.
             const threshold = data.user.idleThresholdSecs ?? 60;
