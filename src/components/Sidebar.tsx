@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react';
+
 interface SidebarProps {
     user: { name: string; email: string };
     activeView: string;
@@ -5,6 +7,7 @@ interface SidebarProps {
     onLogout: () => void;
     theme: 'light' | 'dark';
     onToggleTheme: () => void;
+    shiftActive: boolean; // true when a shift is in progress (working or on_break)
 }
 
 function initial(name: string) {
@@ -50,7 +53,23 @@ const LogoutIcon = () => (
     </svg>
 );
 
-export default function Sidebar({ user, activeView, onViewChange, onLogout, theme, onToggleTheme }: SidebarProps) {
+export default function Sidebar({ user, activeView, onViewChange, onLogout, theme, onToggleTheme, shiftActive }: SidebarProps) {
+    const [showLogoutWarning, setShowLogoutWarning] = useState(false);
+
+    // Auto-dismiss warning when shift ends (e.g. user checks out)
+    useEffect(() => {
+        if (!shiftActive) setShowLogoutWarning(false);
+    }, [shiftActive]);
+
+    const handleLogoutClick = () => {
+        if (shiftActive) {
+            // Shift in progress — show warning instead of logging out
+            setShowLogoutWarning(true);
+        } else {
+            onLogout();
+        }
+    };
+
     const navItems = [
         { id: 'tracker', label: 'Time Tracker', icon: <ClockIcon /> },
         { id: 'history', label: 'History',      icon: <ListIcon /> },
@@ -78,13 +97,46 @@ export default function Sidebar({ user, activeView, onViewChange, onLogout, them
                 </button>
             ))}
 
+            {/* Logout-blocked warning — shown when user tries to logout during active shift */}
+            {showLogoutWarning && (
+                <div style={{
+                    margin: '8px 12px',
+                    padding: '10px 12px',
+                    background: 'var(--danger-bg, #fee2e2)',
+                    border: '1px solid var(--danger, #ef4444)',
+                    borderRadius: 10,
+                    fontSize: 12,
+                    color: 'var(--danger-text, #b91c1c)',
+                    lineHeight: 1.6,
+                    position: 'relative',
+                }}>
+                    <button
+                        onClick={() => setShowLogoutWarning(false)}
+                        style={{
+                            position: 'absolute', top: 6, right: 8,
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            fontSize: 14, color: 'inherit', lineHeight: 1,
+                        }}
+                        aria-label="Dismiss"
+                    >✕</button>
+                    <strong>Shift in progress</strong><br />
+                    Please <strong>Check Out</strong> first to logout.
+                </div>
+            )}
+
             {/* Bottom section: theme toggle + logout */}
             <div className="sidebar__bottom">
                 <button className="sidebar__theme-btn" onClick={onToggleTheme} title="Toggle theme">
                     {theme === 'light' ? <MoonIcon /> : <SunIcon />}
                     {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
                 </button>
-                <button className="sidebar__logout" onClick={onLogout}>
+                <button
+                    id="btn-logout"
+                    className="sidebar__logout"
+                    onClick={handleLogoutClick}
+                    title={shiftActive ? 'Complete or check out your shift before logging out' : 'Logout'}
+                    style={shiftActive ? { opacity: 0.65, cursor: 'not-allowed' } : undefined}
+                >
                     <LogoutIcon />
                     Logout
                 </button>

@@ -17,10 +17,29 @@
 
 process.noDeprecation = true; // Hides non-critical node warnings (like url.parse)
 
-const { app, BrowserWindow, ipcMain, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, powerMonitor, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const tracker = require('./tracking/tracker');
+const { URL } = require('url');
+
+// ── Custom Protocol (Deep-Link Auth) ──────────────────────────────────────────
+// Register workfolio:// as the app's custom URL scheme so the OS can hand
+// browser-to-desktop callbacks back to us after the user authenticates.
+// Must be called before app is ready.
+const DEEP_LINK_PROTOCOL = 'workfolio';
+if (process.defaultApp && process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+} else {
+    app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
+}
+
+// Keep a single desktop instance so deep-link callbacks always target
+// the existing app window instead of launching a second copy.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+    app.quit();
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -47,6 +66,7 @@ const IDLE_POLL_INTERVAL_MS = 1_000; // 1 second
 
 let mainWindow = null;
 let backendProcess = null;
+let pendingAuthCallbackUrl = null;
 
 /**
  * Whether the user is currently considered idle.
@@ -60,6 +80,56 @@ let isUserIdle = false;
  * the time, so we don't want to double-count it as idle time too.
  */
 let isScreenLocked = false;
+
+function extractDeepLink(argv) {
+    return argv.find((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`)) ?? null;
+}
+
+function focusMainWindow() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+}
+
+function dispatchAuthCallback(url) {
+    if (!url) return;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        pendingAuthCallbackUrl = url;
+        return;
+    }
+    mainWindow.webContents.send('auth-callback', { url });
+}
+
+function handleDeepLink(rawUrl) {
+    if (!rawUrl) return;
+    try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== `${DEEP_LINK_PROTOCOL}:`) return;
+
+        console.log('[Auth] Deep link received:', rawUrl);
+        focusMainWindow();
+        dispatchAuthCallback(rawUrl);
+    } catch (err) {
+        console.warn('[Auth] Failed to parse deep link:', rawUrl, err);
+    }
+}
+
+if (gotSingleInstanceLock) {
+    app.on('second-instance', (_event, commandLine) => {
+        const deepLink = extractDeepLink(commandLine);
+        if (deepLink) {
+            handleDeepLink(deepLink);
+            return;
+        }
+        focusMainWindow();
+    });
+}
+
+app.on('open-url', (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
+});
 
 // ── Backend (production only) ─────────────────────────────────────────────────
 
@@ -197,6 +267,12 @@ function createWindow() {
         : `file://${path.join(__dirname, '../dist/index.html')}`;
 
     mainWindow.loadURL(startUrl);
+    mainWindow.webContents.on('did-finish-load', () => {
+        if (!pendingAuthCallbackUrl || !mainWindow || mainWindow.isDestroyed()) return;
+        const url = pendingAuthCallbackUrl;
+        pendingAuthCallbackUrl = null;
+        mainWindow.webContents.send('auth-callback', { url });
+    });
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
         // Start silent application tracking
@@ -211,6 +287,7 @@ function createWindow() {
 // ── App Lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
+    if (!gotSingleInstanceLock) return;
     // ── IPC: Window Controls ──────────────────────────────────────────────────
     // Register IPC handlers after the app is fully ready
     ipcMain.on('window-close', () => mainWindow && mainWindow.close());
@@ -239,9 +316,27 @@ app.whenReady().then(() => {
         }
     });
 
+    // ── IPC: Open Login in System Browser (Device Flow) ─────────────────────
+    // Renderer sends the one-time deviceCode it generated.
+    // We embed it as ?desktopCode=<uuid> so the website POSTs the session
+    // to the backend by that code. The renderer polls the backend every 2s.
+    ipcMain.on('open-login', (_event, deviceCode) => {
+        const loginUrl = new URL('http://localhost:3000/login');
+        loginUrl.searchParams.set('desktopCode', String(deviceCode));
+        loginUrl.searchParams.set('returnTo', 'desktop');
+        shell.openExternal(loginUrl.toString());
+        console.log('[Auth] Opened browser login with deviceCode:', deviceCode);
+    });
+
     createWindow();
     startIdlePolling();        // begin monitoring system idle time
     startScreenLockDetection(); // begin monitoring screen lock/unlock
+
+    // On Windows/Linux cold-start via protocol, deep link is passed in argv.
+    const startupDeepLink = extractDeepLink(process.argv);
+    if (startupDeepLink) {
+        handleDeepLink(startupDeepLink);
+    }
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();

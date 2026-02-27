@@ -1,5 +1,35 @@
 const API_BASE = 'http://localhost:5000/api';
 
+/**
+ * Thrown whenever the backend returns 401 Unauthorized.
+ * App.tsx listens for the custom 'wf:session-expired' event to
+ * clear state and redirect to the login screen automatically.
+ */
+export class SessionExpiredError extends Error {
+    constructor() {
+        super('Session expired — please log in again.');
+        this.name = 'SessionExpiredError';
+    }
+}
+
+/**
+ * Central response handler for all authenticated API calls.
+ * - 401 → clears localStorage, fires 'wf:session-expired', throws SessionExpiredError
+ * - Other errors → throws with the server's error message
+ */
+async function handleResponse(res: Response) {
+    const data = await res.json();
+    if (res.status === 401) {
+        localStorage.removeItem('wf_token');
+        localStorage.removeItem('wf_user');
+        localStorage.removeItem('wf_idle_threshold');
+        window.dispatchEvent(new Event('wf:session-expired'));
+        throw new SessionExpiredError();
+    }
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
+
 function getToken(): string | null {
     return localStorage.getItem('wf_token');
 }
@@ -10,6 +40,7 @@ function authHeaders() {
         Authorization: `Bearer ${getToken()}`,
     };
 }
+
 
 export async function login(email: string, password: string) {
     const res = await fetch(`${API_BASE}/auth/login`, {
@@ -31,52 +62,34 @@ export async function login(email: string, password: string) {
 
 export async function getStatus() {
     const res = await fetch(`${API_BASE}/time/status`, { headers: authHeaders() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to get status');
+    const data = await handleResponse(res);
     return data as {
         status: 'stopped' | 'working' | 'on_break';
         shift: unknown;
-        idleThresholdSecs: number; // live value — updated by admin in real time
-        expectedWorkSecs: number; // org-wide expected shift duration
-        expectedActiveSecs: number; // org-wide expected active (non-idle) duration
+        idleThresholdSecs: number;
+        expectedWorkSecs: number;
+        expectedActiveSecs: number;
     };
 }
 
-
 export async function startShift() {
-    const res = await fetch(`${API_BASE}/time/start`, {
-        method: 'POST',
-        headers: authHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to start shift');
-    return data;
+    const res = await fetch(`${API_BASE}/time/start`, { method: 'POST', headers: authHeaders() });
+    return handleResponse(res);
 }
 
 export async function toggleBreak() {
-    const res = await fetch(`${API_BASE}/time/break`, {
-        method: 'POST',
-        headers: authHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to toggle break');
-    return data;
+    const res = await fetch(`${API_BASE}/time/break`, { method: 'POST', headers: authHeaders() });
+    return handleResponse(res);
 }
 
 export async function stopShift() {
-    const res = await fetch(`${API_BASE}/time/stop`, {
-        method: 'POST',
-        headers: authHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to stop shift');
-    return data;
+    const res = await fetch(`${API_BASE}/time/stop`, { method: 'POST', headers: authHeaders() });
+    return handleResponse(res);
 }
 
 export async function getHistory() {
     const res = await fetch(`${API_BASE}/time/history`, { headers: authHeaders() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to get history');
+    const data = await handleResponse(res);
     return data.shifts as Array<{
         id: string;
         startTime: string;
@@ -84,6 +97,7 @@ export async function getHistory() {
         breaks: Array<{ id: string; startTime: string; endTime: string | null }>;
     }>;
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Idle Session API
@@ -101,34 +115,22 @@ export async function startIdleSession(startTime: string) {
         headers: authHeaders(),
         body: JSON.stringify({ startTime }),
     });
-    const data = await res.json();
-    // 409 means an idle session is already open — not an error for the client
-    if (!res.ok && res.status !== 409) throw new Error(data.error || 'Failed to start idle session');
-    return data;
+    // 409 = idle session already open — not a client error
+    if (res.status === 409) return res.json();
+    return handleResponse(res);
 }
 
-/**
- * Notify the server that the user is active again (idle period ended).
- */
 export async function endIdleSession() {
-    const res = await fetch(`${API_BASE}/time/idle/end`, {
-        method: 'POST',
-        headers: authHeaders(),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to end idle session');
-    return data;
+    const res = await fetch(`${API_BASE}/time/idle/end`, { method: 'POST', headers: authHeaders() });
+    return handleResponse(res);
 }
 
-/**
- * Fetch today's total idle seconds for the dashboard pie chart.
- */
 export async function getTodayIdleSecs(): Promise<number> {
     const res = await fetch(`${API_BASE}/time/idle/today`, { headers: authHeaders() });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to get idle data');
+    const data = await handleResponse(res);
     return (data as { totalIdleSecs: number }).totalIdleSecs;
 }
+
 
 /**
  * Open a Server-Sent Events connection to receive real-time threshold changes.

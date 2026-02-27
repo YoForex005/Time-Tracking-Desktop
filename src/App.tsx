@@ -14,14 +14,34 @@ function getInitialTheme(): 'light' | 'dark' {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+function getSavedUser(): User | null {
+    const raw = localStorage.getItem('wf_user');
+    if (!raw) return null;
+
+    try {
+        const parsed = JSON.parse(raw) as Partial<User>;
+        if (
+            typeof parsed.id === 'string' &&
+            typeof parsed.name === 'string' &&
+            typeof parsed.email === 'string'
+        ) {
+            return { id: parsed.id, name: parsed.name, email: parsed.email };
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 function App() {
-    const savedUser = localStorage.getItem('wf_user');
     const savedToken = localStorage.getItem('wf_token');
 
-    const [user, setUser] = useState<User | null>(savedUser ? JSON.parse(savedUser) : null);
-    const [_token, setToken] = useState<string | null>(savedToken);
+    const [user, setUser] = useState<User | null>(getSavedUser());
+    const [token, setToken] = useState<string | null>(savedToken);
     const [activeView, setView] = useState('tracker');
     const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
+    const [shiftActive, setShiftActive] = useState(false); // true when working or on_break
+
 
     // Apply theme to <html data-theme="..."> whenever it changes
     useEffect(() => {
@@ -29,9 +49,47 @@ function App() {
         localStorage.setItem('wf_theme', theme);
     }, [theme]);
 
+    // Keep Electron tracker auth token in sync with login/logout state.
+    useEffect(() => {
+        const api = (window as unknown as {
+            electronAPI?: {
+                setTrackerAuthToken?: (t: string) => void;
+                clearTrackerAuthToken?: () => void;
+            };
+        }).electronAPI;
+
+        if (!api) return;
+
+        if (token && api.setTrackerAuthToken) {
+            api.setTrackerAuthToken(token);
+            return;
+        }
+
+        if (!token && api.clearTrackerAuthToken) {
+            api.clearTrackerAuthToken();
+        }
+    }, [token]);
+
+    // ── Auto-logout on token expiry ───────────────────────────────────────────
+    // api.ts fires this event whenever any API call returns 401 (token expired).
+    // React state is cleared → app returns to login screen automatically,
+    // showing the user a clean login form instead of cryptic error messages.
+    useEffect(() => {
+        const onExpired = () => {
+            setUser(null);
+            setToken(null);
+        };
+        window.addEventListener('wf:session-expired', onExpired);
+        return () => window.removeEventListener('wf:session-expired', onExpired);
+    }, []);
+
     const toggleTheme = () => setTheme(t => t === 'light' ? 'dark' : 'light');
 
-    const handleLogin = (u: User, t: string) => { setUser(u); setToken(t); };
+    const handleLogin = (u: User, t: string) => {
+        setUser(u);
+        setToken(t);
+    };
+
     const handleLogout = () => {
         localStorage.removeItem('wf_token');
         localStorage.removeItem('wf_user');
@@ -39,7 +97,8 @@ function App() {
         setToken(null);
     };
 
-    if (!user || !savedToken) {
+
+    if (!user || !token) {
         return (
             <>
                 <Titlebar userName="Guest" theme={theme} onToggleTheme={toggleTheme} />
@@ -59,8 +118,10 @@ function App() {
                     onLogout={handleLogout}
                     theme={theme}
                     onToggleTheme={toggleTheme}
+                    shiftActive={shiftActive}
                 />
-                <Dashboard view={activeView} />
+                <Dashboard view={activeView} onShiftStatusChange={setShiftActive} />
+
             </div>
         </>
     );
