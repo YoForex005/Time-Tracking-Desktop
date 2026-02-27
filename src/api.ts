@@ -36,8 +36,8 @@ export async function getStatus() {
     return data as {
         status: 'stopped' | 'working' | 'on_break';
         shift: unknown;
-        idleThresholdSecs:  number; // live value — updated by admin in real time
-        expectedWorkSecs:   number; // org-wide expected shift duration
+        idleThresholdSecs: number; // live value — updated by admin in real time
+        expectedWorkSecs: number; // org-wide expected shift duration
         expectedActiveSecs: number; // org-wide expected active (non-idle) duration
     };
 }

@@ -15,13 +15,13 @@ function getInitialTheme(): 'light' | 'dark' {
 }
 
 function App() {
-    const savedUser  = localStorage.getItem('wf_user');
+    const savedUser = localStorage.getItem('wf_user');
     const savedToken = localStorage.getItem('wf_token');
 
-    const [user,       setUser]   = useState<User | null>(savedUser ? JSON.parse(savedUser) : null);
-    const [_token,     setToken]  = useState<string | null>(savedToken);
-    const [activeView, setView]   = useState('tracker');
-    const [theme,      setTheme]  = useState<'light' | 'dark'>(getInitialTheme);
+    const [user, setUser] = useState<User | null>(savedUser ? JSON.parse(savedUser) : null);
+    const [_token, setToken] = useState<string | null>(savedToken);
+    const [activeView, setView] = useState('tracker');
+    const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
 
     // Apply theme to <html data-theme="..."> whenever it changes
     useEffect(() => {
