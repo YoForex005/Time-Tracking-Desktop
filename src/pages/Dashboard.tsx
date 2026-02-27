@@ -11,7 +11,7 @@
  *   - Idle  (slate  #6366f1)
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTimer, formatDuration } from '../hooks/useTimer';
 import type { HistoryShift } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
@@ -179,7 +179,7 @@ function CheckoutWarningModal({
 }: {
     warnings: WarningItem[];
     onProceed: () => void;
-    onCancel:  () => void;
+    onCancel: () => void;
 }) {
     return (
         <div className="modal-overlay">
@@ -222,9 +222,10 @@ function CheckoutWarningModal({
 
 interface DashboardProps {
     view: string;
+    onShiftStatusChange?: (active: boolean) => void;
 }
 
-export default function Dashboard({ view }: DashboardProps) {
+export default function Dashboard({ view, onShiftStatusChange }: DashboardProps) {
     const {
         status, elapsedSecs, history, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
@@ -232,27 +233,32 @@ export default function Dashboard({ view }: DashboardProps) {
         expectedWorkSecs, expectedActiveSecs,
     } = useTimer();
 
+    // Notify parent whenever the shift active state changes
+    useEffect(() => {
+        onShiftStatusChange?.(status !== 'stopped');
+    }, [status, onShiftStatusChange]);
+
     // Checkout warning modal
-    const [showWarning,    setShowWarning]    = useState(false);
-    const [warningItems,   setWarningItems]   = useState<{label:string;actual:string;expected:string}[]>([]);
+    const [showWarning, setShowWarning] = useState(false);
+    const [warningItems, setWarningItems] = useState<{ label: string; actual: string; expected: string }[]>([]);
     const [proceedingStop, setProceedingStop] = useState(false);
 
     /** Called when user clicks "Check Out" button */
     const handleCheckoutClick = () => {
         const activeSecs = Math.max(0, todayWorked - todayIdleSecs);
-        const unmet: {label:string;actual:string;expected:string}[] = [];
+        const unmet: { label: string; actual: string; expected: string }[] = [];
 
         if (todayWorked < expectedWorkSecs) {
             unmet.push({
-                label:    'Total Work Hours',
-                actual:   formatDuration(todayWorked),
+                label: 'Total Work Hours',
+                actual: formatDuration(todayWorked),
                 expected: formatDuration(expectedWorkSecs),
             });
         }
         if (activeSecs < expectedActiveSecs) {
             unmet.push({
-                label:    'Active Hours (excl. idle)',
-                actual:   formatDuration(activeSecs),
+                label: 'Active Hours (excl. idle)',
+                actual: formatDuration(activeSecs),
                 expected: formatDuration(expectedActiveSecs),
             });
         }
@@ -368,9 +374,9 @@ export default function Dashboard({ view }: DashboardProps) {
                             style={{ minWidth: 190, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px 16px', gap: 8 }}
                         >
                             {/* Chart container header */}
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                            Today's Ratio
-                        </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+                                Today's Ratio
+                            </div>
 
                             <DonutChart
                                 workedSecs={todayWorked}

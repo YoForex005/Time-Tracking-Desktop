@@ -40,6 +40,7 @@ import { useState, useEffect } from 'react';
       const [token, setToken] = useState<string | null>(savedToken);
       const [activeView, setView] = useState('tracker');
       const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
+      const [shiftActive, setShiftActive] = useState(false); // true when working or on_break
 
       // Apply theme to <html data-theme="..."> whenever it changes
       useEffect(() => {
@@ -67,6 +68,16 @@ import { useState, useEffect } from 'react';
               api.clearTrackerAuthToken();
           }
       }, [token]);
+
+      // Auto-logout on token expiry
+      useEffect(() => {
+          const onExpired = () => {
+              setUser(null);
+              setToken(null);
+          };
+          window.addEventListener('wf:session-expired', onExpired);
+          return () => window.removeEventListener('wf:session-expired', onExpired);
+      }, []);
 
       const toggleTheme = () => setTheme(t => t === 'light' ? 'dark' : 'light');
 
@@ -102,8 +113,9 @@ import { useState, useEffect } from 'react';
                       onLogout={handleLogout}
                       theme={theme}
                       onToggleTheme={toggleTheme}
+                      shiftActive={shiftActive}
                   />
-                  <Dashboard view={activeView} />
+                  <Dashboard view={activeView} onShiftStatusChange={setShiftActive} />
               </div>
           </>
       );
