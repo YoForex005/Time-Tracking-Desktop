@@ -1,4 +1,4 @@
-• /**
+ /**
    * LoginPage.tsx - Desktop browser-based login flow.
    *
    * Flow:
