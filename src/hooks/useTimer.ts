@@ -50,6 +50,11 @@ declare global {
             onScreenLocked: (cb: () => void) => void;
             onScreenUnlocked: (cb: () => void) => void;
             removeScreenListeners: () => void;
+            // Tracker auth
+            setTrackerAuthToken: (token: string) => void;
+            clearTrackerAuthToken: () => void;
+            // Idle threshold
+            setIdleThreshold: (seconds: number) => void;
         };
     }
 }
