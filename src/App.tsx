@@ -19,7 +19,7 @@ function App() {
     const savedToken = localStorage.getItem('wf_token');
 
     const [user,       setUser]   = useState<User | null>(savedUser ? JSON.parse(savedUser) : null);
-    const [_token,     setToken]  = useState<string | null>(savedToken);
+    const [token,      setToken]  = useState<string | null>(savedToken);
     const [activeView, setView]   = useState('tracker');
     const [theme,      setTheme]  = useState<'light' | 'dark'>(getInitialTheme);
 
@@ -28,6 +28,26 @@ function App() {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('wf_theme', theme);
     }, [theme]);
+
+    useEffect(() => {
+        const api = (window as unknown as {
+            electronAPI?: {
+                setTrackerAuthToken?: (t: string) => void;
+                clearTrackerAuthToken?: () => void;
+            };
+        }).electronAPI;
+
+        if (!api) return;
+
+        if (token && api.setTrackerAuthToken) {
+            api.setTrackerAuthToken(token);
+            return;
+        }
+
+        if (!token && api.clearTrackerAuthToken) {
+            api.clearTrackerAuthToken();
+        }
+    }, [token]);
 
     const toggleTheme = () => setTheme(t => t === 'light' ? 'dark' : 'light');
 
@@ -39,7 +59,7 @@ function App() {
         setToken(null);
     };
 
-    if (!user || !savedToken) {
+    if (!user || !token) {
         return (
             <>
                 <Titlebar userName="Guest" theme={theme} onToggleTheme={toggleTheme} />
