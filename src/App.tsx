@@ -10,14 +10,12 @@ interface User { id: string; name: string; email: string; }
 function getInitialTheme(): 'light' | 'dark' {
     const saved = localStorage.getItem('wf_theme');
     if (saved === 'dark' || saved === 'light') return saved;
-    // Respect OS preference on first launch
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 function getSavedUser(): User | null {
     const raw = localStorage.getItem('wf_user');
     if (!raw) return null;
-
     try {
         const parsed = JSON.parse(raw) as Partial<User>;
         if (
@@ -41,7 +39,6 @@ function App() {
     const [activeView, setView] = useState('tracker');
     const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
     const [shiftActive, setShiftActive] = useState(false); // true when working or on_break
-
 
     // Apply theme to <html data-theme="..."> whenever it changes
     useEffect(() => {
@@ -70,10 +67,7 @@ function App() {
         }
     }, [token]);
 
-    // ── Auto-logout on token expiry ───────────────────────────────────────────
-    // api.ts fires this event whenever any API call returns 401 (token expired).
-    // React state is cleared → app returns to login screen automatically,
-    // showing the user a clean login form instead of cryptic error messages.
+    // Auto-logout on token expiry — api.ts fires 'wf:session-expired' on 401.
     useEffect(() => {
         const onExpired = () => {
             setUser(null);
@@ -96,7 +90,6 @@ function App() {
         setUser(null);
         setToken(null);
     };
-
 
     if (!user || !token) {
         return (
@@ -121,7 +114,6 @@ function App() {
                     shiftActive={shiftActive}
                 />
                 <Dashboard view={activeView} onShiftStatusChange={setShiftActive} />
-
             </div>
         </>
     );

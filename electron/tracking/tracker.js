@@ -2,7 +2,7 @@ const { execFile } = require('child_process');
 const axios = require('axios');
 
 const TRACKING_INTERVAL_MS = 5000;
-const SYNC_INTERVAL_MS = 10000;
+const SYNC_INTERVAL_MS = 60000;
 const API_BASE = 'http://localhost:5000/api';
 
 const EXCLUDED_PROCESSES = [
@@ -209,6 +209,7 @@ let usageMap = new Map();
 let currentApp = null;
 let lastSeenPids = new Set();
 let lastSyncTime = Date.now();
+let authToken = null;
 
 function normalizeProcessName(processName) {
     if (!processName) return '';
@@ -392,7 +393,11 @@ async function recordActiveWindow() {
 }
 
 async function syncDataToBackend(data) {
-    if (!data || !data.usage) return;
+    if (!data || !data.usage || data.usage.length === 0) return;
+    if (!authToken) {
+        console.log('[Tracker] Sync skipped: auth token missing');
+        return;
+    }
 
     console.log('[Tracker] Syncing to backend');
 
@@ -400,12 +405,38 @@ async function syncDataToBackend(data) {
         await axios.post(
             `${API_BASE}/usage/sync`,
             { active: data.active, usage: data.usage },
-            { headers: { 'Content-Type': 'application/json' } }
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${authToken}`
+                }
+            }
         );
         console.log('[Tracker] Sync success');
     } catch (err) {
+        const status = err?.response?.status;
+        if (status === 401) {
+            console.log('[Tracker] Sync failed: unauthorized token');
+            return;
+        }
         console.log('[Tracker] Sync failed:', err.message);
     }
+}
+
+function setAuthToken(token) {
+    if (typeof token !== 'string') {
+        authToken = null;
+        return;
+    }
+
+    const normalized = token.trim().replace(/^Bearer\s+/i, '');
+    authToken = normalized || null;
+    console.log(authToken ? '[Tracker] Auth token set for usage sync' : '[Tracker] Auth token cleared');
+}
+
+function clearAuthToken() {
+    authToken = null;
+    console.log('[Tracker] Auth token cleared');
 }
 
 function getUsageArray() {
@@ -469,5 +500,7 @@ module.exports = {
     startTracking,
     stopTracking,
     clearTrackingData,
-    getCurrentData
+    getCurrentData,
+    setAuthToken,
+    clearAuthToken
 };

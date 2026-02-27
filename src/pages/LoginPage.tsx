@@ -55,18 +55,20 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         const threshold = data.idleThresholdSecs ?? 60;
         localStorage.setItem('wf_idle_threshold', String(threshold));
 
-        const api = window.electronAPI as { setIdleThreshold?: (s: number) => void } | undefined;
+        const api = window.electronAPI as {
+            setIdleThreshold?: (s: number) => void;
+            setTrackerAuthToken?: (t: string) => void;
+        } | undefined;
         api?.setIdleThreshold?.(threshold);
+        api?.setTrackerAuthToken?.(data.token);
 
         onLogin({ id: data.id, name: data.name, email: data.email }, data.token);
     }, [clearPolling, onLogin]);
 
     const pollDesktopSession = useCallback(async (code: string) => {
         if (sessionConsumedRef.current) return;
-
         try {
             const res = await fetch(`${API_BASE}/auth/desktop-session/${code}`);
-
             if (res.status === 404) return;
             if (res.status === 410) {
                 clearPolling();
@@ -75,7 +77,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 return;
             }
             if (!res.ok) return;
-
             const data = await res.json() as DesktopSessionPayload;
             completeLogin(data);
         } catch {
@@ -85,18 +86,14 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
     useEffect(() => {
         if (!waiting) return;
-
         setExpired(false);
         sessionConsumedRef.current = false;
-
         const code = deviceCode.current;
-
-        // First check immediately, then poll.
+        // First check immediately, then poll every 2s
         void pollDesktopSession(code);
         pollRef.current = setInterval(() => {
             void pollDesktopSession(code);
         }, 2_000);
-
         return () => clearPolling();
     }, [waiting, pollDesktopSession, clearPolling]);
 
@@ -106,14 +103,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             onAuthCallback?: (cb: (_payload: { url?: string }) => void) => void;
             removeAuthCallbackListeners?: () => void;
         } | undefined;
-
         if (!api?.onAuthCallback) return;
-
         const onAuthCallback = () => {
             if (!waiting || expired) return;
             void pollDesktopSession(deviceCode.current);
         };
-
         api.onAuthCallback(onAuthCallback);
         return () => api.removeAuthCallbackListeners?.();
     }, [waiting, expired, pollDesktopSession]);
@@ -121,7 +115,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     const handleOpenBrowser = () => {
         const code = deviceCode.current;
         const api = window.electronAPI as { openLogin?: (deviceCode: string) => void } | undefined;
-
         if (api?.openLogin) {
             api.openLogin(code);
         } else {
@@ -130,7 +123,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 '_blank'
             );
         }
-
         sessionConsumedRef.current = false;
         setExpired(false);
         setWaiting(true);
@@ -169,17 +161,15 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                     </>
                 ) : waiting ? (
                     <>
-                        <div
-                            style={{
-                                background: 'var(--accent-glow)',
-                                border: '1px solid var(--accent)',
-                                borderRadius: 12,
-                                padding: '14px 16px',
-                                marginBottom: 20,
-                                fontSize: 13,
-                                color: 'var(--accent-dark)',
-                            }}
-                        >
+                        <div style={{
+                            background: 'var(--accent-glow)',
+                            border: '1px solid var(--accent)',
+                            borderRadius: 12,
+                            padding: '14px 16px',
+                            marginBottom: 20,
+                            fontSize: 13,
+                            color: 'var(--accent-dark)',
+                        }}>
                             Browser opened. Sign in on the website and this window will update automatically.
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
@@ -196,26 +186,20 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                                 padding: '6px 12px',
                                 cursor: 'pointer',
                             }}
-                            onClick={() => {
-                                clearPolling();
-                                setWaiting(false);
-                            }}
+                            onClick={() => { clearPolling(); setWaiting(false); }}
                         >
                             Cancel
                         </button>
                     </>
                 ) : (
                     <>
-                        <p
-                            style={{
-                                fontSize: 13,
-                                color: 'var(--text-secondary)',
-                                margin: '0 0 24px',
-                                lineHeight: 1.6,
-                            }}
-                        >
-                            Authentication happens in your browser. Click below and you will be signed in here
-                            automatically.
+                        <p style={{
+                            fontSize: 13,
+                            color: 'var(--text-secondary)',
+                            margin: '0 0 24px',
+                            lineHeight: 1.6,
+                        }}>
+                            Authentication happens in your browser. Click below and you will be signed in here automatically.
                         </p>
 
                         <button
@@ -224,16 +208,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                             onClick={handleOpenBrowser}
                             style={{ width: '100%', justifyContent: 'center', gap: 8, fontSize: 15 }}
                         >
-                            <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                                 <polyline points="15 3 21 3 21 9" />
                                 <line x1="10" y1="14" x2="21" y2="3" />
