@@ -2,24 +2,29 @@ const { execFile } = require('child_process');
 const axios = require('axios');
 
 const TRACKING_INTERVAL_MS = 5000;
-const SYNC_INTERVAL_MS = 60000;
+const SYNC_INTERVAL_MS = 5000;  // sync every tracker poll (5s) for near-real-time admin view
+
 const API_BASE = 'http://localhost:5000/api';
 
 const EXCLUDED_PROCESSES = [
+    // Core Windows kernel / session daemons — never user visible
     'svchost', 'dwm', 'csrss', 'wininit', 'winlogon', 'fontdrvhost',
     'lsass', 'services', 'registry', 'smss', 'spoolsv', 'unsecapp',
     'wmiprvse', 'dllhost', 'msiexec', 'taskhostw', 'sihost', 'ctfmon',
     'searchhost', 'shellexperiencehost', 'startmenuexperiencehost',
     'runtimebroker', 'applicationframehost', 'systemsettings',
-    'textinputhost', 'lockapp', 'taskmgr',
+    'textinputhost', 'lockapp',
     'backgroundtaskhost', 'searchindexer', 'securityhealthservice',
     'gamebarpresencewriter', 'audiodg', 'smartscreen', 'wudfhost',
     'mobsync', 'dataexchangehost', 'locationnotificationwindows',
     'monotificationux', 'm365copilot', 'widgets',
-    'node', 'git', 'npm', 'esbuild', 'language_server', 'conhost',
-    'powershell', 'cmd',
-    'msedgewebview2'
+    // Build/dev tools that run in background (not user windows)
+    'node', 'git', 'npm', 'esbuild', 'language_server',
+    'msedgewebview2', 'conhost',
+    // NOTE: taskmgr, powershell, cmd intentionally NOT excluded
+    // so admin can see when users have terminals or task manager open
 ];
+
 
 const PS_SCRIPT = `
 Add-Type @"
@@ -201,8 +206,13 @@ const APP_NAME_OVERRIDES = {
     'chrome': 'Google Chrome',
     'msedge': 'Microsoft Edge',
     'brave': 'Brave',
-    'firefox': 'Firefox'
+    'firefox': 'Firefox',
+    'taskmgr': 'Task Manager',
+    'powershell': 'PowerShell',
+    'cmd': 'Command Prompt',
+    'wt': 'Windows Terminal',
 };
+
 
 let trackingInterval = null;
 let usageMap = new Map();
@@ -303,10 +313,14 @@ function getKeyForApp(app) {
     const proc = normalizeProcessName(app.Process);
     if (isBrowserProcess(proc)) {
         const url = normalizeUrl(app.Url);
-        return url || getBrowserFallback(proc);
+        // If we can't read the tab URL, skip this window entirely.
+        // The individual tab URLs are already tracked as separate entries,
+        // so showing "Google Chrome" alongside them would be redundant.
+        return url || '';
     }
     return getDesktopAppName(proc, app.DisplayName);
 }
+
 
 async function recordActiveWindow() {
     try {

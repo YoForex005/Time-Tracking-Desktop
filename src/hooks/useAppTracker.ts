@@ -16,8 +16,9 @@ export function useAppTracker() {
     const [usage, setUsage] = useState<AppUsageData[]>([]);
     const lastSyncTime = useRef<number>(Date.now());
 
-    // Config: Sync to server every 60 seconds of accumulative changes
-    const SYNC_INTERVAL_MS = 60000;
+    // Config: Sync to server every 10 seconds
+    const SYNC_INTERVAL_MS = 10000;
+
 
     useEffect(() => {
         const win = window as any;
