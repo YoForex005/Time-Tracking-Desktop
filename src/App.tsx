@@ -1,11 +1,15 @@
-import { useState, useEffect } from 'react';
+  import { useState, useEffect } from 'react';
   import './index.css';
   import LoginPage from './pages/LoginPage';
   import Dashboard from './pages/Dashboard';
   import Titlebar from './components/Titlebar';
   import Sidebar from './components/Sidebar';
 
-  interface User { id: string; name: string; email: string; }
+  interface User {
+      id: string;
+      name: string;
+      email: string;
+  }
 
   function getInitialTheme(): 'light' | 'dark' {
       const saved = localStorage.getItem('wf_theme');
@@ -69,7 +73,7 @@ import { useState, useEffect } from 'react';
           }
       }, [token]);
 
-      // Auto-logout on token expiry
+      // Auto-logout on token expiry. api.ts fires 'wf:session-expired' on 401.
       useEffect(() => {
           const onExpired = () => {
               setUser(null);
@@ -79,7 +83,7 @@ import { useState, useEffect } from 'react';
           return () => window.removeEventListener('wf:session-expired', onExpired);
       }, []);
 
-      const toggleTheme = () => setTheme(t => t === 'light' ? 'dark' : 'light');
+      const toggleTheme = () => setTheme(t => (t === 'light' ? 'dark' : 'light'));
 
       const handleLogin = (u: User, t: string) => {
           setUser(u);

@@ -40,63 +40,69 @@
           }
       }, []);
 
-      const completeLogin = useCallback((data: DesktopSessionPayload) => {
-          if (sessionConsumedRef.current) return;
-          sessionConsumedRef.current = true;
-          clearPolling();
+      const completeLogin = useCallback(
+          (data: DesktopSessionPayload) => {
+              if (sessionConsumedRef.current) return;
+              sessionConsumedRef.current = true;
+              clearPolling();
 
-          localStorage.setItem('wf_token', data.token);
-          localStorage.setItem('wf_user', JSON.stringify({
-              id: data.id,
-              name: data.name,
-              email: data.email,
-          }));
+              localStorage.setItem('wf_token', data.token);
+              localStorage.setItem(
+                  'wf_user',
+                  JSON.stringify({
+                      id: data.id,
+                      name: data.name,
+                      email: data.email,
+                  })
+              );
 
-          const threshold = data.idleThresholdSecs ?? 60;
-          localStorage.setItem('wf_idle_threshold', String(threshold));
+              const threshold = data.idleThresholdSecs ?? 60;
+              localStorage.setItem('wf_idle_threshold', String(threshold));
 
-          const api = window.electronAPI as { setIdleThreshold?: (s: number) => void } | undefined;
-          api?.setIdleThreshold?.(threshold);
+              const api = window.electronAPI as {
+                  setIdleThreshold?: (s: number) => void;
+                  setTrackerAuthToken?: (t: string) => void;
+              } | undefined;
+              api?.setIdleThreshold?.(threshold);
+              api?.setTrackerAuthToken?.(data.token);
 
-          onLogin({ id: data.id, name: data.name, email: data.email }, data.token);
-      }, [clearPolling, onLogin]);
+              onLogin({ id: data.id, name: data.name, email: data.email }, data.token);
+          },
+          [clearPolling, onLogin]
+      );
 
-      const pollDesktopSession = useCallback(async (code: string) => {
-          if (sessionConsumedRef.current) return;
-
-          try {
-              const res = await fetch(`${API_BASE}/auth/desktop-session/${code}`);
-
-              if (res.status === 404) return;
-              if (res.status === 410) {
-                  clearPolling();
-                  setExpired(true);
-                  setWaiting(false);
-                  return;
+      const pollDesktopSession = useCallback(
+          async (code: string) => {
+              if (sessionConsumedRef.current) return;
+              try {
+                  const res = await fetch(`${API_BASE}/auth/desktop-session/${code}`);
+                  if (res.status === 404) return;
+                  if (res.status === 410) {
+                      clearPolling();
+                      setExpired(true);
+                      setWaiting(false);
+                      return;
+                  }
+                  if (!res.ok) return;
+                  const data = (await res.json()) as DesktopSessionPayload;
+                  completeLogin(data);
+              } catch {
+                  // Retry on next tick.
               }
-              if (!res.ok) return;
-
-              const data = await res.json() as DesktopSessionPayload;
-              completeLogin(data);
-          } catch {
-              // Retry on next tick.
-          }
-      }, [clearPolling, completeLogin]);
+          },
+          [clearPolling, completeLogin]
+      );
 
       useEffect(() => {
           if (!waiting) return;
-
           setExpired(false);
           sessionConsumedRef.current = false;
-
           const code = deviceCode.current;
-
-          // First check immediately, then poll.
+          // First check immediately, then poll every 2s
           void pollDesktopSession(code);
           pollRef.current = setInterval(() => {
               void pollDesktopSession(code);
           }, 2_000);
-
           return () => clearPolling();
       }, [waiting, pollDesktopSession, clearPolling]);
 
@@ -106,14 +112,11 @@
               onAuthCallback?: (cb: (_payload: { url?: string }) => void) => void;
               removeAuthCallbackListeners?: () => void;
           } | undefined;
-
           if (!api?.onAuthCallback) return;
-
           const onAuthCallback = () => {
               if (!waiting || expired) return;
               void pollDesktopSession(deviceCode.current);
           };
-
           api.onAuthCallback(onAuthCallback);
           return () => api.removeAuthCallbackListeners?.();
       }, [waiting, expired, pollDesktopSession]);
@@ -121,7 +124,6 @@
       const handleOpenBrowser = () => {
           const code = deviceCode.current;
           const api = window.electronAPI as { openLogin?: (deviceCode: string) => void } | undefined;
-
           if (api?.openLogin) {
               api.openLogin(code);
           } else {
@@ -130,7 +132,6 @@
                   '_blank'
               );
           }
-
           sessionConsumedRef.current = false;
           setExpired(false);
           setWaiting(true);
@@ -215,7 +216,7 @@
                               }}
                           >
                               Authentication happens in your browser. Click below and you will be signed in here
-                              automatically.
+  automatically.
                           </p>
 
                           <button
