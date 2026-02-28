@@ -230,7 +230,7 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
         status, elapsedSecs, history, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
         todayWorked, todayBreakSecs, todayBreaksCount, todayIdleSecs,
-        expectedWorkSecs, expectedActiveSecs,
+        expectedWorkSecs, expectedActiveSecs, maxBreaks,
     } = useTimer();
 
     // Notify parent whenever the shift active state changes
@@ -347,7 +347,7 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
                                     <div className="stat-card__label">Breaks Taken</div>
                                     <div className="stat-card__value">
                                         {todayBreaksCount}
-                                        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 4 }}>/ 10</span>
+                                        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 4 }}>/ {maxBreaks}</span>
                                     </div>
                                 </div>
 

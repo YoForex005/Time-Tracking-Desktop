@@ -109,6 +109,8 @@ export function useTimer() {
     // shows a checkout warning if not met.
     const [expectedWorkSecs, setExpectedWorkSecs] = useState(28800); // 8h default
     const [expectedActiveSecs, setExpectedActiveSecs] = useState(25200); // 7h default
+    const [maxBreaks, setMaxBreaks] = useState(3);     // admin-configurable break limit
+
 
     // ── Idle state ────────────────────────────────────────────────────────────
     // `closedIdleSecs` = total seconds from all COMPLETED idle sessions (from backend).
@@ -158,6 +160,8 @@ export function useTimer() {
             // ── Keep work-time targets in sync ───────────────────────────────
             if (typeof data.expectedWorkSecs === 'number') setExpectedWorkSecs(data.expectedWorkSecs);
             if (typeof data.expectedActiveSecs === 'number') setExpectedActiveSecs(data.expectedActiveSecs);
+            if (typeof data.maxBreaks === 'number') setMaxBreaks(data.maxBreaks);
+
 
         } catch {
             setStatus('stopped');
@@ -431,9 +435,9 @@ export function useTimer() {
         if (!currentShift) return;
         setError('');
 
-        // Enforce the 10-break daily limit on the frontend for instant feedback
-        if (status !== 'on_break' && todayBreaksCount >= 10) {
-            setError('Only 10 breaks are available for a single day');
+        // Enforce the admin-configurable break limit for instant feedback
+        if (status !== 'on_break' && todayBreaksCount >= maxBreaks) {
+            setError(`Break limit reached — only ${maxBreaks} break${maxBreaks !== 1 ? 's' : ''} are allowed per shift`);
             return;
         }
 
@@ -523,5 +527,6 @@ export function useTimer() {
         todayIdleSecs,        // real-time idle seconds (increments every second)
         expectedWorkSecs,     // org-wide expected total shift length
         expectedActiveSecs,   // org-wide expected active (non-idle) time
+        maxBreaks,            // org-wide max breaks per shift (admin-configurable)
     };
 }

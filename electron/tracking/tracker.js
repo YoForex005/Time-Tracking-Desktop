@@ -373,11 +373,15 @@ async function recordActiveWindow() {
             };
 
             usageMap.set(key, {
-                seconds: existing.seconds + durationToAdd,
+                // Only credit time to the actively focused (foreground) app.
+                // Background apps are still tracked so they appear in the list,
+                // but their seconds stay frozen until the user switches to them.
+                seconds: existing.seconds + (app.IsForeground ? durationToAdd : 0),
                 title: app.Title || existing.title || '',
                 path: app.Path || existing.path || '',
                 lastSeen: now
             });
+
 
             if (isBrowserProcess(app.Process) && !app.Url) {
                 console.log('[Tracker] Browser URL missing:', normalizeProcessName(app.Process), 'Title:', app.Title || '');
