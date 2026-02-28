@@ -69,6 +69,7 @@ export async function getStatus() {
         idleThresholdSecs: number;
         expectedWorkSecs: number;
         expectedActiveSecs: number;
+        maxBreaks: number;
     };
 }
 
