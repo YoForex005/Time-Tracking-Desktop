@@ -21,6 +21,7 @@ const { app, BrowserWindow, ipcMain, powerMonitor, shell } = require('electron')
 const path = require('path');
 const { spawn } = require('child_process');
 const tracker = require('./tracking/tracker');
+const screenshotScheduler = require('./tracking/screenshotScheduler');
 const { URL } = require('url');
 
 // ── Custom Protocol (Deep-Link Auth) ──────────────────────────────────────────
@@ -277,9 +278,12 @@ function createWindow() {
         mainWindow.show();
         // Start silent application tracking
         tracker.startTracking(mainWindow);
+        // Start silent periodic screenshot scheduler
+        screenshotScheduler.start();
     });
     mainWindow.on('closed', () => {
         tracker.stopTracking();
+        screenshotScheduler.stop();
         mainWindow = null;
     });
 }
@@ -310,10 +314,12 @@ app.whenReady().then(() => {
     ipcMain.on('set-tracker-auth-token', (_event, token) => {
         if (typeof token !== 'string') return;
         tracker.setAuthToken(token);
+        screenshotScheduler.setAuthToken(token);
     });
 
     ipcMain.on('clear-tracker-auth-token', () => {
         tracker.clearAuthToken();
+        screenshotScheduler.clearAuthToken();
     });
 
     // ── IPC: Dynamic Idle Threshold (NEW — Admin Portal) ─────────────────────
@@ -354,6 +360,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
     tracker.stopTracking();
+    screenshotScheduler.stop();
     if (backendProcess) backendProcess.kill();
     if (process.platform !== 'darwin') app.quit();
 });
