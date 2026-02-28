@@ -2,7 +2,7 @@ const { captureCurrentMonitorPng } = require('./screenshotCapture');
 const { getDefaultDeviceId, getWorkStatus, uploadScreenshot } = require('./screenshotUploader');
 
 const IS_DEV = process.env.NODE_ENV === 'development';
-const SCREENSHOT_INTERVAL_MS = IS_DEV ? 30_000 : 20 * 60 * 1000;
+const SCREENSHOT_INTERVAL_MS =  20 * 60 * 1000;
 
 let authToken = null;
 let timer = null;
