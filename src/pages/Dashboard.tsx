@@ -11,9 +11,8 @@
  *   - Idle  (slate  #6366f1)
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTimer, formatDuration } from '../hooks/useTimer';
-import type { HistoryShift } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -31,27 +30,6 @@ function StatusBadge({ status }: { status: string }) {
             {labels[status] ?? status}
         </span>
     );
-}
-
-/** Format an ISO timestamp as a short time string (e.g. "09:30 AM") */
-function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-/** Format an ISO timestamp as a short date string (e.g. "Feb 25") */
-function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-/** Calculate net worked seconds for a shift (total elapsed minus all break time) */
-function calcNetDuration(shift: HistoryShift): number {
-    const endMs = shift.endTime ? new Date(shift.endTime).getTime() : Date.now();
-    const total = Math.floor((endMs - new Date(shift.startTime).getTime()) / 1000);
-    const breakSecs = shift.breaks.reduce((acc, b) => {
-        const breakEnd = b.endTime ? new Date(b.endTime).getTime() : Date.now();
-        return acc + Math.floor((breakEnd - new Date(b.startTime).getTime()) / 1000);
-    }, 0);
-    return Math.max(0, total - breakSecs);
 }
 
 // ── DonutChart ────────────────────────────────────────────────────────────────
@@ -222,21 +200,16 @@ function CheckoutWarningModal({
 
 interface DashboardProps {
     view: string;
-    onShiftStatusChange?: (active: boolean) => void;
+    onLogout: () => void;
 }
 
-export default function Dashboard({ view, onShiftStatusChange }: DashboardProps) {
+export default function Dashboard({ view, onLogout }: DashboardProps) {
     const {
-        status, elapsedSecs, history, loading, actionLoading, error,
+        status, elapsedSecs, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
         todayWorked, todayBreakSecs, todayBreaksCount, todayIdleSecs,
         expectedWorkSecs, expectedActiveSecs, maxBreaks,
     } = useTimer();
-
-    // Notify parent whenever the shift active state changes
-    useEffect(() => {
-        onShiftStatusChange?.(status !== 'stopped');
-    }, [status, onShiftStatusChange]);
 
     // Checkout warning modal
     const [showWarning, setShowWarning] = useState(false);
@@ -339,12 +312,6 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
 
                                 {/* Breaks Taken */}
                                 <div className="stat-card">
-                                    <div className="stat-card__icon green">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Breaks Taken</div>
                                     <div className="stat-card__value">
                                         {todayBreaksCount}
                                         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 4 }}>/ {maxBreaks}</span>
@@ -450,53 +417,6 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
                                 Check Out
                             </button>
                         </div>
-                    </div>
-                </>
-            )}
-
-            {/* ── HISTORY VIEW ─────────────────────────────────────────────── */}
-            {view === 'history' && (
-                <>
-                    <div className="page-header">
-                        <h1>Shift History</h1>
-                        <p>Your last 10 shifts and break records</p>
-                    </div>
-                    <div className="history-card">
-                        <div className="history-card__header">
-                            <span className="history-card__title">Recent Shifts</span>
-                        </div>
-                        {history.length === 0 ? (
-                            <div className="empty-state">No shifts recorded yet. Check in to start tracking!</div>
-                        ) : (
-                            <table className="history-table">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Check In</th>
-                                        <th>Check Out</th>
-                                        <th>Breaks</th>
-                                        <th>Net Worked</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {history.map(shift => (
-                                        <tr key={shift.id}>
-                                            <td>{formatDate(shift.startTime)}</td>
-                                            <td>{formatTime(shift.startTime)}</td>
-                                            <td>{shift.endTime ? formatTime(shift.endTime) : '—'}</td>
-                                            <td>{shift.breaks.length} break{shift.breaks.length !== 1 ? 's' : ''}</td>
-                                            <td>{formatDuration(calcNetDuration(shift))}</td>
-                                            <td>
-                                                {shift.endTime
-                                                    ? <span className="badge completed">Completed</span>
-                                                    : <span className="badge ongoing">● Ongoing</span>}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
                     </div>
                 </>
             )}
