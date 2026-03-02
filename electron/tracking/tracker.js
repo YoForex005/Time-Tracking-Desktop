@@ -268,19 +268,26 @@ function normalizeUrl(rawUrl) {
     let s = String(rawUrl).trim();
     if (!s) return '';
 
-    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) {
-        if (/^[^\s]+\.[^\s]+$/.test(s) || /^localhost(?::\d+)?(\/|$)/i.test(s)) {
-            s = `https://${s}`;
-        }
+    if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(s)) {
+        const hostLike =
+            /^localhost(?::\d+)?(\/|$)/i.test(s) ||
+            /^127(?:\.\d{1,3}){3}(?::\d+)?(\/|$)/.test(s) ||
+            /^(\[[a-fA-F0-9:]+\]|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?::\d+)?(\/|$)/.test(s);
+        if (!hostLike) return '';
+        s = `http://${s}`;
     }
 
     try {
         const u = new URL(s);
-        u.hash = '';
-        u.search = '';
-        return u.toString();
+        if (!u.hostname) return '';
+        const host = u.hostname.toLowerCase();
+        const port = u.port;
+        const isDefaultPort =
+            (u.protocol === 'http:' && port === '80') ||
+            (u.protocol === 'https:' && port === '443');
+        return !port || isDefaultPort ? host : `${host}:${port}`;
     } catch (_) {
-        return s;
+        return '';
     }
 }
 
