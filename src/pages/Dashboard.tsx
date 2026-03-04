@@ -162,38 +162,31 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
             {/* ── TRACKER VIEW ─────────────────────────────────────────────── */}
             {view === 'tracker' && (
                 <>
-                    {/* Yo HRMX Branding Header and Logout */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 16, paddingTop: 8 }}>
-                        <div style={{ width: 60 }} /> {/* Spacer to balance the logout button */}
+                    {/* Yo HRMX Branding Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: 16, paddingTop: 8 }}>
                         <div style={{
                             fontSize: 18,
                             fontWeight: 800,
                             letterSpacing: '0.15em',
                             color: 'var(--text-secondary)',
-                            textTransform: 'uppercase',
-                            marginLeft: 10
+                            textTransform: 'uppercase'
                         }}>
                             Yo HRMX
                         </div>
-                        <button
-                            id="btn-logout"
-                            className="btn btn-ghost"
-                            onClick={onLogout}
-                            disabled={status !== 'stopped'}
-                            title={status !== 'stopped' ? 'Please check out before logging out' : 'Logout'}
-                            style={{ fontSize: 11, padding: '4px 8px', whiteSpace: 'nowrap', border: 'none', background: 'transparent', boxShadow: 'none' }}
-                        >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                                <polyline points="16 17 21 12 16 7" />
-                                <line x1="21" y1="12" x2="9" y2="12" />
-                            </svg>
-                        </button>
                     </div>
 
                     {/* Timer Control Card */}
                     <div className="timer-card">
-                        <StatusBadge status={status} />
+                        {status === 'working' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
+                                <img src="/cctv.gif" alt="CCTV" style={{ width: 50, height:50}} />
+                                <span style={{ fontSize: 11, color: 'rgba(239, 68, 68, 0.85)', fontWeight: 600, letterSpacing: '0.02em', textShadow: '0 2px 4px rgba(239, 68, 68, 0.15)' }}>
+                                    Your screen is under observation..
+                                </span>
+                            </div>
+                        ) : (
+                            <StatusBadge status={status} />
+                        )}
 
                         <div className={`timer-display ${status}`} id="timer-display">
                             {formatDuration(todayWorked)}
@@ -244,6 +237,26 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                                 Check Out
                             </button>
                         </div>
+                    </div>
+
+                    {/* View Dashboard & Logout (Beneath the timer) */}
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
+                        <button
+                            className="btn"
+                            onClick={() => window.open('http://localhost:3000/dashboard', '_blank')}
+                            style={{ flex: 1, padding: '10px', fontSize: 13, background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                            View Dashboard
+                        </button>
+                        <button
+                            className="btn btn-ghost"
+                            onClick={onLogout}
+                            disabled={status !== 'stopped'}
+                            title={status !== 'stopped' ? 'Please check out before logging out' : 'Logout'}
+                            style={{ flex: 1, padding: '10px', fontSize: 13, color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                            Logout
+                        </button>
                     </div>
                 </>
             )}

@@ -149,11 +149,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         <div className="login-page">
             <div className="login-card" style={{ textAlign: 'center', maxWidth: 380, background: 'rgba(255, 255, 255, 0.65)', backdropFilter: 'blur(24px)', border: '1px solid rgba(255,255,255,0.8)' }}>
                 <div className="login__brand">
-                    <div className="login__brand-icon" style={{ background: 'var(--accent-gradient)', color: '#fff' }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 28, height: 28 }}>
-                            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                        </svg>
-                    </div>
+                    
                     <h1 style={{ letterSpacing: '0.15em', background: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>YO HRMX</h1>
                     <p>Time Tracker Widget</p>
                 </div>
