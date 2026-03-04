@@ -32,158 +32,57 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
-// ── DonutChart ────────────────────────────────────────────────────────────────
-
-interface DonutChartProps {
-    workedSecs: number; // green arc
-    breakSecs: number;  // amber arc
-    idleSecs: number;   // indigo arc
-}
-
-/**
- * SVG donut (pie) chart with three segments:
- *   Green  = productive work time
- *   Amber  = break time
- *   Indigo = idle time (no mouse/keyboard activity for >1 min during a shift)
- */
-function DonutChart({ workedSecs, breakSecs, idleSecs }: DonutChartProps) {
-    const total = workedSecs + breakSecs + idleSecs;
-    const r = 52;
-    const cx = 70, cy = 70;
-    const circumference = 2 * Math.PI * r;
-
-    // Empty state — no shift data yet
-    if (total === 0) {
-        return (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                <svg width="140" height="140" viewBox="0 0 140 140">
-                    {/* Track ring uses border variable */}
-                    <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth="18" />
-                    <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--text-muted)" fontSize="11" fontWeight="500">No data</text>
-                    <text x={cx} y={cy + 12} textAnchor="middle" fill="var(--text-muted)" fontSize="10">Check in first</text>
-                </svg>
-            </div>
-        );
-    }
-
-    // Calculate each segment's arc length as a fraction of the full circumference
-    const workDash = (workedSecs / total) * circumference;
-    const breakDash = (breakSecs / total) * circumference;
-    const idleDash = (idleSecs / total) * circumference;
-
-    // Each arc starts where the previous one ended (using strokeDashoffset)
-    const workOffset = 0;
-    const breakOffset = -workDash;
-    const idleOffset = -(workDash + breakDash);
-
-    const workPct = Math.round((workedSecs / total) * 100);
-
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-            <svg width="140" height="140" viewBox="0 0 140 140">
-                {/* Background track — uses border variable, visible in both modes */}
-                <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth="18" />
-
-                {/* Work arc — green */}
-                <circle
-                    cx={cx} cy={cy} r={r} fill="none"
-                    stroke="#22c55e" strokeWidth="18"
-                    strokeDasharray={`${workDash} ${circumference}`}
-                    strokeDashoffset={workOffset}
-                    transform={`rotate(-90 ${cx} ${cy})`}
-                    strokeLinecap="butt"
-                />
-
-                {/* Break arc — amber */}
-                {breakDash > 0 && (
-                    <circle
-                        cx={cx} cy={cy} r={r} fill="none"
-                        stroke="#f59e0b" strokeWidth="18"
-                        strokeDasharray={`${breakDash} ${circumference}`}
-                        strokeDashoffset={breakOffset}
-                        transform={`rotate(-90 ${cx} ${cy})`}
-                        strokeLinecap="butt"
-                    />
-                )}
-
-                {/* Idle arc — indigo */}
-                {idleDash > 0 && (
-                    <circle
-                        cx={cx} cy={cy} r={r} fill="none"
-                        stroke="#6366f1" strokeWidth="18"
-                        strokeDasharray={`${idleDash} ${circumference}`}
-                        strokeDashoffset={idleOffset}
-                        transform={`rotate(-90 ${cx} ${cy})`}
-                        strokeLinecap="butt"
-                    />
-                )}
-
-                {/* Center label — use CSS variables for text visibility in both modes */}
-                <text x={cx} y={cy - 7} textAnchor="middle" fill="var(--text-primary)" fontSize="15" fontWeight="700">
-                    {workPct}%
-                </text>
-                <text x={cx} y={cy + 10} textAnchor="middle" fill="var(--text-muted)" fontSize="10">
-                    work ratio
-                </text>
-            </svg>
-
-            {/* Legend — use CSS variable for label text */}
-            <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-secondary)', flexWrap: 'wrap', justifyContent: 'center' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e', display: 'inline-block' }} />
-                    Work
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />
-                    Break
-                </span>
-                {idleSecs > 0 && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: 2, background: '#6366f1', display: 'inline-block' }} />
-                        Idle
-                    </span>
-                )}
-            </div>
-        </div>
-    );
-}
-
 // ── CheckoutWarningModal ──────────────────────────────────────────────────
 
-interface WarningItem { label: string; actual: string; expected: string; }
-
 function CheckoutWarningModal({
-    warnings, onProceed, onCancel
+    remainingSecs, onProceed, onCancel
 }: {
-    warnings: WarningItem[];
+    remainingSecs: number;
     onProceed: () => void;
     onCancel: () => void;
 }) {
     return (
         <div className="modal-overlay">
             <div className="modal">
-                <div className="modal__icon">
-                    ⚠️
-                </div>
-                <h2 className="modal__title">Work criteria not met</h2>
-                <p className="modal__body">You haven't completed the expected work hours for today.</p>
-
-                <div className="modal__warnings">
-                    {warnings.map(w => (
-                        <div key={w.label} className="modal__warning-row">
-                            <span className="modal__warning-label">{w.label}</span>
-                            <span className="modal__warning-vals">
-                                <span className="modal__actual">{w.actual} worked</span>
-                                <span className="modal__sep">/</span>
-                                <span className="modal__expected">{w.expected} expected</span>
-                            </span>
-                        </div>
-                    ))}
+                {/* Clock icon */}
+                <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                    <div style={{
+                        width: 56, height: 56, borderRadius: '50%',
+                        background: '#fff7ed',
+                        border: '2px solid #fed7aa',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto',
+                        fontSize: 26,
+                    }}>
+                        ⏱️
+                    </div>
                 </div>
 
-                <p className="modal__question">Are you sure you want to check out early?</p>
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', textAlign: 'center', margin: '0 0 6px' }}>
+                    Not enough work hours yet
+                </h2>
+                <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', margin: '0 0 20px' }}>
+                    You still need to work for
+                </p>
 
-                <div className="modal__actions">
+                {/* Big remaining time display */}
+                <div style={{
+                    background: '#f9fafb',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 14,
+                    padding: '16px 24px',
+                    textAlign: 'center',
+                    marginBottom: 20,
+                }}>
+                    <div style={{ fontSize: 36, fontWeight: 800, color: '#ef4444', letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>
+                        {formatDuration(remainingSecs)}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        remaining today
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10 }}>
                     <button className="modal__btn modal__btn--secondary" onClick={onCancel}>
                         Keep Working
                     </button>
@@ -207,37 +106,24 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
     const {
         status, elapsedSecs, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
-        todayWorked, todayBreakSecs, todayBreaksCount, todayIdleSecs,
-        expectedWorkSecs, expectedActiveSecs, maxBreaks,
+        todayWorked, todayBreakSecs: _todayBreakSecs, todayBreaksCount, todayIdleSecs,
+        expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks,
     } = useTimer();
 
     // Checkout warning modal
     const [showWarning, setShowWarning] = useState(false);
-    const [warningItems, setWarningItems] = useState<{ label: string; actual: string; expected: string }[]>([]);
+    const [remainingSecs, setRemainingSecs] = useState(0);
     const [proceedingStop, setProceedingStop] = useState(false);
 
     /** Called when user clicks "Check Out" button */
     const handleCheckoutClick = () => {
         const activeSecs = Math.max(0, todayWorked - todayIdleSecs);
-        const unmet: { label: string; actual: string; expected: string }[] = [];
+        const workShortfall = Math.max(0, expectedWorkSecs - todayWorked);
+        const activeShortfall = Math.max(0, expectedActiveSecs - activeSecs);
+        const maxShortfall = Math.max(workShortfall, activeShortfall);
 
-        if (todayWorked < expectedWorkSecs) {
-            unmet.push({
-                label: 'Total Work Hours',
-                actual: formatDuration(todayWorked),
-                expected: formatDuration(expectedWorkSecs),
-            });
-        }
-        if (activeSecs < expectedActiveSecs) {
-            unmet.push({
-                label: 'Active Hours (excl. idle)',
-                actual: formatDuration(activeSecs),
-                expected: formatDuration(expectedActiveSecs),
-            });
-        }
-
-        if (unmet.length > 0) {
-            setWarningItems(unmet);
+        if (maxShortfall > 0) {
+            setRemainingSecs(maxShortfall);
             setShowWarning(true);
         } else {
             handleStop(); // All criteria met — proceed immediately
@@ -267,7 +153,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
             {/* Checkout warning modal */}
             {showWarning && (
                 <CheckoutWarningModal
-                    warnings={warningItems}
+                    remainingSecs={remainingSecs}
                     onProceed={confirmStop}
                     onCancel={() => setShowWarning(false)}
                 />
@@ -276,80 +162,18 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
             {/* ── TRACKER VIEW ─────────────────────────────────────────────── */}
             {view === 'tracker' && (
                 <>
-                    <div className="page-header">
-                        <h1>Time Tracker</h1>
-                        <p>Track your working hours, breaks, and idle time</p>
-                    </div>
-
-                    {/* Stats row + Pie Chart */}
-                    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-
-                        {/* Left: Stat Cards (2×3 grid) */}
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            <div className="stats-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-
-                                {/* Today Worked */}
-                                <div className="stat-card">
-                                    <div className="stat-card__icon purple">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Today Worked</div>
-                                    <div className="stat-card__value">{formatDuration(todayWorked)}</div>
-                                </div>
-
-                                {/* Break Time */}
-                                <div className="stat-card">
-                                    <div className="stat-card__icon orange">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="8" y1="12" x2="16" y2="12" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Break Time</div>
-                                    <div className="stat-card__value">{formatDuration(todayBreakSecs)}</div>
-                                </div>
-
-                                {/* Breaks Taken */}
-                                <div className="stat-card">
-                                    <div className="stat-card__value">
-                                        {todayBreaksCount}
-                                        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 4 }}>/ {maxBreaks}</span>
-                                    </div>
-                                </div>
-
-                                {/* Idle Time — new stat card */}
-                                <div className="stat-card">
-                                    <div className="stat-card__icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            {/* Moon / sleep icon representing idle */}
-                                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Idle Time</div>
-                                    <div className="stat-card__value" style={{ color: todayIdleSecs > 0 ? '#818cf8' : undefined }}>
-                                        {formatDuration(todayIdleSecs)}
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
-
-                        {/* Right: Donut Pie Chart (now includes idle segment) */}
-                        <div
-                            className="stat-card"
-                            style={{ minWidth: 190, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px 16px', gap: 8 }}
-                        >
-                            {/* Chart container header */}
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                                Today's Ratio
-                            </div>
-
-                            <DonutChart
-                                workedSecs={todayWorked}
-                                breakSecs={todayBreakSecs}
-                                idleSecs={todayIdleSecs}
-                            />
+                    {/* Yo HRMX Branding Header */}
+                    <div style={{ textAlign: 'center', paddingBottom: 8, paddingTop: 4 }}>
+                        <div style={{
+                            fontSize: 22,
+                            fontWeight: 800,
+                            letterSpacing: '0.12em',
+                            background: 'linear-gradient(135deg, var(--accent) 0%, #818cf8 100%)',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                            backgroundClip: 'text',
+                        }}>
+                            Yo HRMX
                         </div>
                     </div>
 
@@ -417,6 +241,23 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                                 Check Out
                             </button>
                         </div>
+                    </div>
+
+                    {/* Logout */}
+                    <div style={{ textAlign: 'center', marginTop: -8 }}>
+                        <button
+                            id="btn-logout"
+                            className="btn btn-ghost"
+                            onClick={onLogout}
+                            style={{ fontSize: 12, padding: '7px 20px', color: 'var(--text-muted)' }}
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                <polyline points="16 17 21 12 16 7" />
+                                <line x1="21" y1="12" x2="9" y2="12" />
+                            </svg>
+                            Logout
+                        </button>
                     </div>
                 </>
             )}
