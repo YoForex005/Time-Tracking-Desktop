@@ -42,14 +42,14 @@ function CheckoutWarningModal({
     onCancel: () => void;
 }) {
     return (
-        <div className="modal-overlay">
-            <div className="modal">
+        <div className="modal-overlay" style={{ background: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(8px)' }}>
+            <div className="modal" style={{ background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 24px 64px -12px rgba(0,0,0,0.15)' }}>
                 {/* Clock icon */}
                 <div style={{ textAlign: 'center', marginBottom: 12 }}>
                     <div style={{
-                        width: 56, height: 56, borderRadius: '50%',
-                        background: '#fff7ed',
-                        border: '2px solid #fed7aa',
+                        width: 56, height: 56, borderRadius: '28px',
+                        background: 'linear-gradient(135deg, #fffbeb, #fef3c7)',
+                        boxShadow: '0 8px 16px -4px rgba(251, 191, 36, 0.3)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         margin: '0 auto',
                         fontSize: 26,
@@ -58,35 +58,35 @@ function CheckoutWarningModal({
                     </div>
                 </div>
 
-                <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', textAlign: 'center', margin: '0 0 6px' }}>
-                    Not enough work hours yet
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
+                    Not enough work hours
                 </h2>
-                <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', margin: '0 0 20px' }}>
+                <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: '0 0 20px', fontWeight: 500 }}>
                     You still need to work for
                 </p>
 
                 {/* Big remaining time display */}
                 <div style={{
-                    background: '#f9fafb',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 14,
-                    padding: '16px 24px',
+                    background: 'rgba(248, 250, 252, 0.5)',
+                    border: '1px solid rgba(226, 232, 240, 0.8)',
+                    borderRadius: 16,
+                    padding: '20px 24px',
                     textAlign: 'center',
-                    marginBottom: 20,
+                    marginBottom: 24,
                 }}>
-                    <div style={{ fontSize: 36, fontWeight: 800, color: '#ef4444', letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>
+                    <div style={{ fontSize: 40, fontWeight: 800, color: '#ef4444', letterSpacing: '-2px', fontVariantNumeric: 'tabular-nums', textShadow: '0 4px 16px rgba(239, 68, 68, 0.2)' }}>
                         {formatDuration(remainingSecs)}
                     </div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
                         remaining today
                     </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 10 }}>
-                    <button className="modal__btn modal__btn--secondary" onClick={onCancel}>
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-ghost" onClick={onCancel} style={{ flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: 'none' }}>
                         Keep Working
                     </button>
-                    <button className="modal__btn modal__btn--danger" onClick={onProceed}>
+                    <button className="btn btn-danger" onClick={onProceed} style={{ flex: 1, padding: '12px' }}>
                         Check Out Anyway
                     </button>
                 </div>
@@ -104,7 +104,7 @@ interface DashboardProps {
 
 export default function Dashboard({ view, onLogout }: DashboardProps) {
     const {
-        status, elapsedSecs, loading, actionLoading, error,
+        status, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
         todayWorked, todayBreakSecs: _todayBreakSecs, todayBreaksCount, todayIdleSecs,
         expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks,
@@ -143,7 +143,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
     if (loading) {
         return (
             <div className="main" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
+                <div className="spinner" />
             </div>
         );
     }
@@ -162,19 +162,33 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
             {/* ── TRACKER VIEW ─────────────────────────────────────────────── */}
             {view === 'tracker' && (
                 <>
-                    {/* Yo HRMX Branding Header */}
-                    <div style={{ textAlign: 'center', paddingBottom: 8, paddingTop: 4 }}>
+                    {/* Yo HRMX Branding Header and Logout */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 16, paddingTop: 8 }}>
+                        <div style={{ width: 60 }} /> {/* Spacer to balance the logout button */}
                         <div style={{
-                            fontSize: 22,
+                            fontSize: 18,
                             fontWeight: 800,
-                            letterSpacing: '0.12em',
-                            background: 'linear-gradient(135deg, var(--accent) 0%, #818cf8 100%)',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            backgroundClip: 'text',
+                            letterSpacing: '0.15em',
+                            color: 'var(--text-secondary)',
+                            textTransform: 'uppercase',
+                            marginLeft: 10
                         }}>
                             Yo HRMX
                         </div>
+                        <button
+                            id="btn-logout"
+                            className="btn btn-ghost"
+                            onClick={onLogout}
+                            disabled={status !== 'stopped'}
+                            title={status !== 'stopped' ? 'Please check out before logging out' : 'Logout'}
+                            style={{ fontSize: 11, padding: '4px 8px', whiteSpace: 'nowrap', border: 'none', background: 'transparent', boxShadow: 'none' }}
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                <polyline points="16 17 21 12 16 7" />
+                                <line x1="21" y1="12" x2="9" y2="12" />
+                            </svg>
+                        </button>
                     </div>
 
                     {/* Timer Control Card */}
@@ -182,7 +196,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                         <StatusBadge status={status} />
 
                         <div className={`timer-display ${status}`} id="timer-display">
-                            {formatDuration(elapsedSecs)}
+                            {formatDuration(todayWorked)}
                         </div>
 
                         <div className="timer-sub">
@@ -199,10 +213,9 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                                 className="btn btn-success"
                                 onClick={handleStart}
                                 disabled={status !== 'stopped' || actionLoading}
+                                style={{ whiteSpace: 'nowrap' }}
                             >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <polygon points="5 3 19 12 5 21 5 3" />
-                                </svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
                                 Check In
                             </button>
 
@@ -211,21 +224,12 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                                 className={`btn ${status === 'on_break' ? 'btn-primary' : 'btn-warning'}`}
                                 onClick={handleBreak}
                                 disabled={status === 'stopped' || actionLoading || (status !== 'on_break' && todayBreaksCount >= 10)}
+                                style={{ whiteSpace: 'nowrap' }}
                             >
                                 {status === 'on_break' ? (
-                                    <>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                            <polygon points="5 3 19 12 5 21 5 3" />
-                                        </svg>
-                                        Resume Work
-                                    </>
+                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>Resume</>
                                 ) : (
-                                    <>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
-                                        </svg>
-                                        Take Break {todayBreaksCount >= 10 ? '(Limit)' : ''}
-                                    </>
+                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>Break{todayBreaksCount >= 10 ? ' (Max)' : ''}</>
                                 )}
                             </button>
 
@@ -234,30 +238,12 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                                 className="btn btn-danger"
                                 onClick={handleCheckoutClick}
                                 disabled={status === 'stopped' || actionLoading || proceedingStop}
+                                style={{ whiteSpace: 'nowrap' }}
                             >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                                </svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /></svg>
                                 Check Out
                             </button>
                         </div>
-                    </div>
-
-                    {/* Logout */}
-                    <div style={{ textAlign: 'center', marginTop: -8 }}>
-                        <button
-                            id="btn-logout"
-                            className="btn btn-ghost"
-                            onClick={onLogout}
-                            style={{ fontSize: 12, padding: '7px 20px', color: 'var(--text-muted)' }}
-                        >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                                <polyline points="16 17 21 12 16 7" />
-                                <line x1="21" y1="12" x2="9" y2="12" />
-                            </svg>
-                            Logout
-                        </button>
                     </div>
                 </>
             )}

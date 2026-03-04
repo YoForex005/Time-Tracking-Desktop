@@ -374,12 +374,14 @@ export function useTimer() {
         s => new Date(s.startTime).getTime() >= todayStart && s.endTime !== null
     );
 
-    const historyWork = completedToday.reduce(
+    const _historyWork = completedToday.reduce(
         (acc, s) => acc + calcDuration(s.startTime, s.endTime) - calcTotalBreakSecs(s.breaks), 0
     );
-    const historyBreakSecs = completedToday.reduce(
+    const _historyBreakSecs = completedToday.reduce(
         (acc, s) => acc + calcTotalBreakSecs(s.breaks), 0
     );
+    void _historyWork;
+    void _historyBreakSecs;
 
     // Break count: use history as ground truth (status API may omit older breaks)
     const breaksCountFromHistory = history
@@ -402,8 +404,11 @@ export function useTimer() {
         elapsedSecs = totalElapsed;
     }
 
-    const todayWorked = historyWork + activeWork;
-    const todayBreakSecs = historyBreakSecs + activeBreakSecs;
+    // Show only the CURRENT shift's work/break time.
+    // After checkout (currentShift = null), activeWork = 0 → timer resets to 00:00:00.
+    // One check-in → check-out = one shift. Backend history is unaffected.
+    const todayWorked = activeWork;
+    const todayBreakSecs = activeBreakSecs;
 
     // ── Idle time: combine closed sessions (from backend) + live active session ──
     // `closedIdleSecs` = sum of all finished idle sessions fetched from backend.
