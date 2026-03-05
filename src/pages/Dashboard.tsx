@@ -11,9 +11,8 @@
  *   - Idle  (slate  #6366f1)
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTimer, formatDuration } from '../hooks/useTimer';
-import type { HistoryShift } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -33,183 +32,61 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
-/** Format an ISO timestamp as a short time string (e.g. "09:30 AM") */
-function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-/** Format an ISO timestamp as a short date string (e.g. "Feb 25") */
-function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
-}
-
-/** Calculate net worked seconds for a shift (total elapsed minus all break time) */
-function calcNetDuration(shift: HistoryShift): number {
-    const endMs = shift.endTime ? new Date(shift.endTime).getTime() : Date.now();
-    const total = Math.floor((endMs - new Date(shift.startTime).getTime()) / 1000);
-    const breakSecs = shift.breaks.reduce((acc, b) => {
-        const breakEnd = b.endTime ? new Date(b.endTime).getTime() : Date.now();
-        return acc + Math.floor((breakEnd - new Date(b.startTime).getTime()) / 1000);
-    }, 0);
-    return Math.max(0, total - breakSecs);
-}
-
-// ── DonutChart ────────────────────────────────────────────────────────────────
-
-interface DonutChartProps {
-    workedSecs: number; // green arc
-    breakSecs: number;  // amber arc
-    idleSecs: number;   // indigo arc
-}
-
-/**
- * SVG donut (pie) chart with three segments:
- *   Green  = productive work time
- *   Amber  = break time
- *   Indigo = idle time (no mouse/keyboard activity for >1 min during a shift)
- */
-function DonutChart({ workedSecs, breakSecs, idleSecs }: DonutChartProps) {
-    const total = workedSecs + breakSecs + idleSecs;
-    const r = 52;
-    const cx = 70, cy = 70;
-    const circumference = 2 * Math.PI * r;
-
-    // Empty state — no shift data yet
-    if (total === 0) {
-        return (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                <svg width="140" height="140" viewBox="0 0 140 140">
-                    {/* Track ring uses border variable */}
-                    <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth="18" />
-                    <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--text-muted)" fontSize="11" fontWeight="500">No data</text>
-                    <text x={cx} y={cy + 12} textAnchor="middle" fill="var(--text-muted)" fontSize="10">Check in first</text>
-                </svg>
-            </div>
-        );
-    }
-
-    // Calculate each segment's arc length as a fraction of the full circumference
-    const workDash = (workedSecs / total) * circumference;
-    const breakDash = (breakSecs / total) * circumference;
-    const idleDash = (idleSecs / total) * circumference;
-
-    // Each arc starts where the previous one ended (using strokeDashoffset)
-    const workOffset = 0;
-    const breakOffset = -workDash;
-    const idleOffset = -(workDash + breakDash);
-
-    const workPct = Math.round((workedSecs / total) * 100);
-
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-            <svg width="140" height="140" viewBox="0 0 140 140">
-                {/* Background track — uses border variable, visible in both modes */}
-                <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--border)" strokeWidth="18" />
-
-                {/* Work arc — green */}
-                <circle
-                    cx={cx} cy={cy} r={r} fill="none"
-                    stroke="#22c55e" strokeWidth="18"
-                    strokeDasharray={`${workDash} ${circumference}`}
-                    strokeDashoffset={workOffset}
-                    transform={`rotate(-90 ${cx} ${cy})`}
-                    strokeLinecap="butt"
-                />
-
-                {/* Break arc — amber */}
-                {breakDash > 0 && (
-                    <circle
-                        cx={cx} cy={cy} r={r} fill="none"
-                        stroke="#f59e0b" strokeWidth="18"
-                        strokeDasharray={`${breakDash} ${circumference}`}
-                        strokeDashoffset={breakOffset}
-                        transform={`rotate(-90 ${cx} ${cy})`}
-                        strokeLinecap="butt"
-                    />
-                )}
-
-                {/* Idle arc — indigo */}
-                {idleDash > 0 && (
-                    <circle
-                        cx={cx} cy={cy} r={r} fill="none"
-                        stroke="#6366f1" strokeWidth="18"
-                        strokeDasharray={`${idleDash} ${circumference}`}
-                        strokeDashoffset={idleOffset}
-                        transform={`rotate(-90 ${cx} ${cy})`}
-                        strokeLinecap="butt"
-                    />
-                )}
-
-                {/* Center label — use CSS variables for text visibility in both modes */}
-                <text x={cx} y={cy - 7} textAnchor="middle" fill="var(--text-primary)" fontSize="15" fontWeight="700">
-                    {workPct}%
-                </text>
-                <text x={cx} y={cy + 10} textAnchor="middle" fill="var(--text-muted)" fontSize="10">
-                    work ratio
-                </text>
-            </svg>
-
-            {/* Legend — use CSS variable for label text */}
-            <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-secondary)', flexWrap: 'wrap', justifyContent: 'center' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#22c55e', display: 'inline-block' }} />
-                    Work
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />
-                    Break
-                </span>
-                {idleSecs > 0 && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: 2, background: '#6366f1', display: 'inline-block' }} />
-                        Idle
-                    </span>
-                )}
-            </div>
-        </div>
-    );
-}
-
 // ── CheckoutWarningModal ──────────────────────────────────────────────────
 
-interface WarningItem { label: string; actual: string; expected: string; }
-
 function CheckoutWarningModal({
-    warnings, onProceed, onCancel
+    remainingSecs, onProceed, onCancel
 }: {
-    warnings: WarningItem[];
+    remainingSecs: number;
     onProceed: () => void;
     onCancel: () => void;
 }) {
     return (
-        <div className="modal-overlay">
-            <div className="modal">
-                <div className="modal__icon">
-                    ⚠️
-                </div>
-                <h2 className="modal__title">Work criteria not met</h2>
-                <p className="modal__body">You haven't completed the expected work hours for today.</p>
-
-                <div className="modal__warnings">
-                    {warnings.map(w => (
-                        <div key={w.label} className="modal__warning-row">
-                            <span className="modal__warning-label">{w.label}</span>
-                            <span className="modal__warning-vals">
-                                <span className="modal__actual">{w.actual} worked</span>
-                                <span className="modal__sep">/</span>
-                                <span className="modal__expected">{w.expected} expected</span>
-                            </span>
-                        </div>
-                    ))}
+        <div className="modal-overlay" style={{ background: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(8px)' }}>
+            <div className="modal" style={{ background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 24px 64px -12px rgba(0,0,0,0.15)' }}>
+                {/* Clock icon */}
+                <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                    <div style={{
+                        width: 56, height: 56, borderRadius: '28px',
+                        background: 'linear-gradient(135deg, #fffbeb, #fef3c7)',
+                        boxShadow: '0 8px 16px -4px rgba(251, 191, 36, 0.3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto',
+                        fontSize: 26,
+                    }}>
+                        ⏱️
+                    </div>
                 </div>
 
-                <p className="modal__question">Are you sure you want to check out early?</p>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
+                    Not enough work hours
+                </h2>
+                <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: '0 0 20px', fontWeight: 500 }}>
+                    You still need to work for
+                </p>
 
-                <div className="modal__actions">
-                    <button className="modal__btn modal__btn--secondary" onClick={onCancel}>
+                {/* Big remaining time display */}
+                <div style={{
+                    background: 'rgba(248, 250, 252, 0.5)',
+                    border: '1px solid rgba(226, 232, 240, 0.8)',
+                    borderRadius: 16,
+                    padding: '20px 24px',
+                    textAlign: 'center',
+                    marginBottom: 24,
+                }}>
+                    <div style={{ fontSize: 40, fontWeight: 800, color: '#ef4444', letterSpacing: '-2px', fontVariantNumeric: 'tabular-nums', textShadow: '0 4px 16px rgba(239, 68, 68, 0.2)' }}>
+                        {formatDuration(remainingSecs)}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
+                        remaining today
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-ghost" onClick={onCancel} style={{ flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: 'none' }}>
                         Keep Working
                     </button>
-                    <button className="modal__btn modal__btn--danger" onClick={onProceed}>
+                    <button className="btn btn-danger" onClick={onProceed} style={{ flex: 1, padding: '12px' }}>
                         Check Out Anyway
                     </button>
                 </div>
@@ -222,49 +99,31 @@ function CheckoutWarningModal({
 
 interface DashboardProps {
     view: string;
-    onShiftStatusChange?: (active: boolean) => void;
+    onLogout: () => void;
 }
 
-export default function Dashboard({ view, onShiftStatusChange }: DashboardProps) {
+export default function Dashboard({ view, onLogout }: DashboardProps) {
     const {
-        status, elapsedSecs, history, loading, actionLoading, error,
+        status, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
-        todayWorked, todayBreakSecs, todayBreaksCount, todayIdleSecs,
-        expectedWorkSecs, expectedActiveSecs, maxBreaks,
+        todayWorked, todayBreakSecs: _todayBreakSecs, todayBreaksCount, todayIdleSecs,
+        expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks,
     } = useTimer();
-
-    // Notify parent whenever the shift active state changes
-    useEffect(() => {
-        onShiftStatusChange?.(status !== 'stopped');
-    }, [status, onShiftStatusChange]);
 
     // Checkout warning modal
     const [showWarning, setShowWarning] = useState(false);
-    const [warningItems, setWarningItems] = useState<{ label: string; actual: string; expected: string }[]>([]);
+    const [remainingSecs, setRemainingSecs] = useState(0);
     const [proceedingStop, setProceedingStop] = useState(false);
 
     /** Called when user clicks "Check Out" button */
     const handleCheckoutClick = () => {
         const activeSecs = Math.max(0, todayWorked - todayIdleSecs);
-        const unmet: { label: string; actual: string; expected: string }[] = [];
+        const workShortfall = Math.max(0, expectedWorkSecs - todayWorked);
+        const activeShortfall = Math.max(0, expectedActiveSecs - activeSecs);
+        const maxShortfall = Math.max(workShortfall, activeShortfall);
 
-        if (todayWorked < expectedWorkSecs) {
-            unmet.push({
-                label: 'Total Work Hours',
-                actual: formatDuration(todayWorked),
-                expected: formatDuration(expectedWorkSecs),
-            });
-        }
-        if (activeSecs < expectedActiveSecs) {
-            unmet.push({
-                label: 'Active Hours (excl. idle)',
-                actual: formatDuration(activeSecs),
-                expected: formatDuration(expectedActiveSecs),
-            });
-        }
-
-        if (unmet.length > 0) {
-            setWarningItems(unmet);
+        if (maxShortfall > 0) {
+            setRemainingSecs(maxShortfall);
             setShowWarning(true);
         } else {
             handleStop(); // All criteria met — proceed immediately
@@ -284,7 +143,7 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
     if (loading) {
         return (
             <div className="main" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
+                <div className="spinner" />
             </div>
         );
     }
@@ -294,7 +153,7 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
             {/* Checkout warning modal */}
             {showWarning && (
                 <CheckoutWarningModal
-                    warnings={warningItems}
+                    remainingSecs={remainingSecs}
                     onProceed={confirmStop}
                     onCancel={() => setShowWarning(false)}
                 />
@@ -303,95 +162,34 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
             {/* ── TRACKER VIEW ─────────────────────────────────────────────── */}
             {view === 'tracker' && (
                 <>
-                    <div className="page-header">
-                        <h1>Time Tracker</h1>
-                        <p>Track your working hours, breaks, and idle time</p>
-                    </div>
-
-                    {/* Stats row + Pie Chart */}
-                    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-
-                        {/* Left: Stat Cards (2×3 grid) */}
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            <div className="stats-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-
-                                {/* Today Worked */}
-                                <div className="stat-card">
-                                    <div className="stat-card__icon purple">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Today Worked</div>
-                                    <div className="stat-card__value">{formatDuration(todayWorked)}</div>
-                                </div>
-
-                                {/* Break Time */}
-                                <div className="stat-card">
-                                    <div className="stat-card__icon orange">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="8" y1="12" x2="16" y2="12" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Break Time</div>
-                                    <div className="stat-card__value">{formatDuration(todayBreakSecs)}</div>
-                                </div>
-
-                                {/* Breaks Taken */}
-                                <div className="stat-card">
-                                    <div className="stat-card__icon green">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Breaks Taken</div>
-                                    <div className="stat-card__value">
-                                        {todayBreaksCount}
-                                        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 4 }}>/ {maxBreaks}</span>
-                                    </div>
-                                </div>
-
-                                {/* Idle Time — new stat card */}
-                                <div className="stat-card">
-                                    <div className="stat-card__icon" style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            {/* Moon / sleep icon representing idle */}
-                                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                                        </svg>
-                                    </div>
-                                    <div className="stat-card__label">Idle Time</div>
-                                    <div className="stat-card__value" style={{ color: todayIdleSecs > 0 ? '#818cf8' : undefined }}>
-                                        {formatDuration(todayIdleSecs)}
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
-
-                        {/* Right: Donut Pie Chart (now includes idle segment) */}
-                        <div
-                            className="stat-card"
-                            style={{ minWidth: 190, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px 16px', gap: 8 }}
-                        >
-                            {/* Chart container header */}
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                                Today's Ratio
-                            </div>
-
-                            <DonutChart
-                                workedSecs={todayWorked}
-                                breakSecs={todayBreakSecs}
-                                idleSecs={todayIdleSecs}
-                            />
+                    {/* Yo HRMX Branding Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: 16, paddingTop: 8 }}>
+                        <div style={{
+                            fontSize: 18,
+                            fontWeight: 800,
+                            letterSpacing: '0.15em',
+                            color: 'var(--text-secondary)',
+                            textTransform: 'uppercase'
+                        }}>
+                            Yo HRMX
                         </div>
                     </div>
 
                     {/* Timer Control Card */}
                     <div className="timer-card">
-                        <StatusBadge status={status} />
+                        {status === 'working' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
+                                <img src="/cctv.gif" alt="CCTV" style={{ width: 50, height:50}} />
+                                <span style={{ fontSize: 11, color: 'rgba(239, 68, 68, 0.85)', fontWeight: 600, letterSpacing: '0.02em', textShadow: '0 2px 4px rgba(239, 68, 68, 0.15)' }}>
+                                    Your screen is under observation..
+                                </span>
+                            </div>
+                        ) : (
+                            <StatusBadge status={status} />
+                        )}
 
                         <div className={`timer-display ${status}`} id="timer-display">
-                            {formatDuration(elapsedSecs)}
+                            {formatDuration(todayWorked)}
                         </div>
 
                         <div className="timer-sub">
@@ -408,10 +206,9 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
                                 className="btn btn-success"
                                 onClick={handleStart}
                                 disabled={status !== 'stopped' || actionLoading}
+                                style={{ whiteSpace: 'nowrap' }}
                             >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <polygon points="5 3 19 12 5 21 5 3" />
-                                </svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
                                 Check In
                             </button>
 
@@ -420,21 +217,12 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
                                 className={`btn ${status === 'on_break' ? 'btn-primary' : 'btn-warning'}`}
                                 onClick={handleBreak}
                                 disabled={status === 'stopped' || actionLoading || (status !== 'on_break' && todayBreaksCount >= 10)}
+                                style={{ whiteSpace: 'nowrap' }}
                             >
                                 {status === 'on_break' ? (
-                                    <>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                            <polygon points="5 3 19 12 5 21 5 3" />
-                                        </svg>
-                                        Resume Work
-                                    </>
+                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>Resume</>
                                 ) : (
-                                    <>
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
-                                        </svg>
-                                        Take Break {todayBreaksCount >= 10 ? '(Limit)' : ''}
-                                    </>
+                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>Break{todayBreaksCount >= 10 ? ' (Max)' : ''}</>
                                 )}
                             </button>
 
@@ -443,60 +231,32 @@ export default function Dashboard({ view, onShiftStatusChange }: DashboardProps)
                                 className="btn btn-danger"
                                 onClick={handleCheckoutClick}
                                 disabled={status === 'stopped' || actionLoading || proceedingStop}
+                                style={{ whiteSpace: 'nowrap' }}
                             >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                                </svg>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /></svg>
                                 Check Out
                             </button>
                         </div>
                     </div>
-                </>
-            )}
 
-            {/* ── HISTORY VIEW ─────────────────────────────────────────────── */}
-            {view === 'history' && (
-                <>
-                    <div className="page-header">
-                        <h1>Shift History</h1>
-                        <p>Your last 10 shifts and break records</p>
-                    </div>
-                    <div className="history-card">
-                        <div className="history-card__header">
-                            <span className="history-card__title">Recent Shifts</span>
-                        </div>
-                        {history.length === 0 ? (
-                            <div className="empty-state">No shifts recorded yet. Check in to start tracking!</div>
-                        ) : (
-                            <table className="history-table">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Check In</th>
-                                        <th>Check Out</th>
-                                        <th>Breaks</th>
-                                        <th>Net Worked</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {history.map(shift => (
-                                        <tr key={shift.id}>
-                                            <td>{formatDate(shift.startTime)}</td>
-                                            <td>{formatTime(shift.startTime)}</td>
-                                            <td>{shift.endTime ? formatTime(shift.endTime) : '—'}</td>
-                                            <td>{shift.breaks.length} break{shift.breaks.length !== 1 ? 's' : ''}</td>
-                                            <td>{formatDuration(calcNetDuration(shift))}</td>
-                                            <td>
-                                                {shift.endTime
-                                                    ? <span className="badge completed">Completed</span>
-                                                    : <span className="badge ongoing">● Ongoing</span>}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
+                    {/* View Dashboard & Logout (Beneath the timer) */}
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
+                        <button
+                            className="btn"
+                            onClick={() => window.open('http://localhost:3000/dashboard', '_blank')}
+                            style={{ flex: 1, padding: '10px', fontSize: 13, background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                            View Dashboard
+                        </button>
+                        <button
+                            className="btn btn-ghost"
+                            onClick={onLogout}
+                            disabled={status !== 'stopped'}
+                            title={status !== 'stopped' ? 'Please check out before logging out' : 'Logout'}
+                            style={{ flex: 1, padding: '10px', fontSize: 13, color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                            Logout
+                        </button>
                     </div>
                 </>
             )}

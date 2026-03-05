@@ -248,10 +248,10 @@ function startScreenLockDetection() {
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 1100,
-        height: 720,
-        minWidth: 900,
-        minHeight: 600,
+        width: 480,
+        height: 500,
+        minWidth: 420,
+        minHeight: 420,
         frame: false,
         titleBarStyle: 'hidden',
         webPreferences: {
@@ -328,6 +328,12 @@ app.whenReady().then(() => {
         if (typeof seconds === 'number' && seconds >= 10) {
             IDLE_THRESHOLD_SECS = Math.round(seconds);
             console.log(`[Idle] Threshold updated by admin to ${IDLE_THRESHOLD_SECS}s`);
+        }
+    });
+
+    ipcMain.on('set-screenshot-interval', (_event, seconds) => {
+        if (typeof seconds === 'number' && seconds >= 60 && seconds <= 3600) {
+            screenshotScheduler.setIntervalSecs(Math.round(seconds));
         }
     });
 

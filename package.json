@@ -39,8 +39,8 @@
     "wait-on": "^9.0.4"
   },
   "build": {
-    "appId": "com.workfolio.timetracker",
-    "productName": "Workfolio",
+    "appId": "com.yohrmx.timetracker",
+    "productName": "YO HRMX",
     "directories": {
       "output": "release"
     },
