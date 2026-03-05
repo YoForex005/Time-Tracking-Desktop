@@ -333,11 +333,9 @@ async function recordActiveWindow() {
     try {
         const apps = await getRunningApps();
         if (!apps || apps.length === 0) {
-            console.log('[Tracker] No windows detected');
             return null;
         }
 
-        console.log('[Tracker] Windows detected:', apps.length);
 
         const durationToAdd = TRACKING_INTERVAL_MS / 1000;
         const now = Date.now();
@@ -390,9 +388,6 @@ async function recordActiveWindow() {
             });
 
 
-            if (isBrowserProcess(app.Process) && !app.Url) {
-                console.log('[Tracker] Browser URL missing:', normalizeProcessName(app.Process), 'Title:', app.Title || '');
-            }
         }
 
         currentApp = foregroundApp;
@@ -402,10 +397,6 @@ async function recordActiveWindow() {
         }
 
         lastSeenPids = currentSeenPids;
-
-        console.log('[Tracker] Open items:', openKeys.length);
-        if (openKeys.length) console.log('[Tracker] Items:', openKeys.join(', '));
-        console.log('[Tracker] Foreground:', foregroundApp ? foregroundApp.name : 'NONE');
 
         return {
             active: currentApp,

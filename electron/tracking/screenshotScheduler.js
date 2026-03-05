@@ -35,7 +35,6 @@ function clearTimer() {
 function scheduleNextTick() {
     clearTimer();
     if (!running) return;
-    console.log(`[Screenshot] Next capture in ${describeInterval(screenshotIntervalMs)}`);
 
     timer = setTimeout(async () => {
         await runCaptureCycle();
@@ -44,10 +43,7 @@ function scheduleNextTick() {
 }
 
 async function runCaptureCycle() {
-    if (tickInFlight) {
-        console.log('[Screenshot] Skipping cycle: previous cycle still running');
-        return;
-    }
+    if (tickInFlight) return;
     if (!authToken) {
         console.log('[Screenshot] Skipping cycle: auth token missing');
         return;
@@ -55,18 +51,10 @@ async function runCaptureCycle() {
 
     tickInFlight = true;
     try {
-        console.log(`[Screenshot] Cycle started at ${new Date().toISOString()}`);
         const status = await getWorkStatus(authToken);
-        console.log(`[Screenshot] Current work status: ${status ?? 'unknown'}`);
-        if (status !== 'working') {
-            console.log('[Screenshot] Skipped capture: user is not in working status');
-            return;
-        }
+        if (status !== 'working') return;
 
         const capture = await captureCurrentMonitorPng();
-        console.log(
-            `[Screenshot] Captured monitor ${capture.display.width}x${capture.display.height} (${capture.imageBuffer.length} bytes PNG)`
-        );
         const payload = {
             capturedAt: new Date().toISOString(),
             deviceId,
