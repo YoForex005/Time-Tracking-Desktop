@@ -331,6 +331,12 @@ app.whenReady().then(() => {
         }
     });
 
+    ipcMain.on('set-screenshot-interval', (_event, seconds) => {
+        if (typeof seconds === 'number' && seconds >= 60 && seconds <= 3600) {
+            screenshotScheduler.setIntervalSecs(Math.round(seconds));
+        }
+    });
+
     // ── IPC: Open Login in System Browser (Device Flow) ─────────────────────
     // Renderer sends the one-time deviceCode it generated.
     // We embed it as ?desktopCode=<uuid> so the website POSTs the session

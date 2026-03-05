@@ -55,6 +55,8 @@ declare global {
             clearTrackerAuthToken: () => void;
             // Idle threshold
             setIdleThreshold: (seconds: number) => void;
+            // Screenshot interval
+            setScreenshotInterval: (seconds: number) => void;
         };
     }
 }
@@ -103,6 +105,7 @@ export function useTimer() {
     const lastThresholdRef = useRef<number>(
         parseInt(localStorage.getItem('wf_idle_threshold') ?? '60', 10)
     );
+    const lastScreenshotIntervalRef = useRef<number>(600);
 
     // ── Work-time targets (from OrgSettings, delivered via status poll) ────────
     // Admin sets these in the admin portal. Desktop reads them every poll and
@@ -161,6 +164,20 @@ export function useTimer() {
             if (typeof data.expectedWorkSecs === 'number') setExpectedWorkSecs(data.expectedWorkSecs);
             if (typeof data.expectedActiveSecs === 'number') setExpectedActiveSecs(data.expectedActiveSecs);
             if (typeof data.maxBreaks === 'number') setMaxBreaks(data.maxBreaks);
+            if (
+                typeof data.screenshotIntervalSecs === 'number' &&
+                data.screenshotIntervalSecs !== lastScreenshotIntervalRef.current
+            ) {
+                console.log(
+                    `[Screenshot] Admin updated interval -> ${data.screenshotIntervalSecs}s. Syncing to desktop scheduler.`
+                );
+                lastScreenshotIntervalRef.current = data.screenshotIntervalSecs;
+                const api = window.electronAPI;
+                if (api && 'setScreenshotInterval' in api) {
+                    (api as unknown as { setScreenshotInterval: (s: number) => void })
+                        .setScreenshotInterval(data.screenshotIntervalSecs);
+                }
+            }
 
 
         } catch {
@@ -226,11 +243,9 @@ export function useTimer() {
     // so admin changes to work time targets would only appear after a user action.
     // This poll ensures settings propagate within 30 seconds automatically.
     useEffect(() => {
-        if (status === 'working' || status === 'on_break') {
-            const interval = window.setInterval(fetchStatus, 30_000);
-            return () => clearInterval(interval);
-        }
-    }, [status, fetchStatus]);
+        const interval = window.setInterval(fetchStatus, 30_000);
+        return () => clearInterval(interval);
+    }, [fetchStatus]);
 
 
     // ── Real-time idle threshold sync (SSE) ─────────────────────────────────

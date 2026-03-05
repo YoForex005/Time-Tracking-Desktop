@@ -70,6 +70,7 @@ export async function getStatus() {
         expectedWorkSecs: number;
         expectedActiveSecs: number;
         maxBreaks: number;
+        screenshotIntervalSecs: number;
     };
 }
 

@@ -87,6 +87,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Called by the renderer after login to push the admin-set per-user threshold
     // to the main process, replacing the default 60-second hardcoded value.
     setIdleThreshold: (seconds) => ipcRenderer.send('set-idle-threshold', seconds),
+    setScreenshotInterval: (seconds) => ipcRenderer.send('set-screenshot-interval', seconds),
 
     // ── Browser-Based Device-Flow Auth ────────────────────────────────────────
     /**
