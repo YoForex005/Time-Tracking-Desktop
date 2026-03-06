@@ -349,7 +349,13 @@ app.whenReady().then(() => {
         console.log('[Auth] Opened browser login with deviceCode:', deviceCode);
     });
 
+    ipcMain.on('open-dashboard', () => {
+        shell.openExternal('http://localhost:3000/dashboard');
+        console.log('[Auth] Opened browser dashboard');
+    });
+
     createWindow();
+
     startIdlePolling();        // begin monitoring system idle time
     startScreenLockDetection(); // begin monitoring screen lock/unlock
 

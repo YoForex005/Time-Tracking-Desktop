@@ -106,4 +106,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeAuthCallbackListeners: () => {
         ipcRenderer.removeAllListeners('auth-callback');
     },
+    /**
+     * Opens the website dashboard in the system browser.
+     */
+    openDashboard: () => ipcRenderer.send('open-dashboard'),
 });
+

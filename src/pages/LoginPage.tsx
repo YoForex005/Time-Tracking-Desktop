@@ -15,7 +15,7 @@ interface LoginPageProps {
     onLogin: (user: { id: string; name: string; email: string }, token: string) => void;
 }
 
-const API_BASE = 'http://localhost:5000/api';
+import { API_BASE } from '../config';
 
 interface DesktopSessionPayload {
     token: string;
@@ -149,7 +149,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         <div className="login-page">
             <div className="login-card" style={{ textAlign: 'center', maxWidth: 380, background: 'rgba(255, 255, 255, 0.65)', backdropFilter: 'blur(24px)', border: '1px solid rgba(255,255,255,0.8)' }}>
                 <div className="login__brand">
-                    
+
                     <h1 style={{ letterSpacing: '0.15em', background: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>YO HRMX</h1>
                     <p>Time Tracker Widget</p>
                 </div>
