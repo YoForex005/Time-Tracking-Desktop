@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:5000/api';
+import { API_BASE } from '../config';
 
 function getToken(): string | null {
     return localStorage.getItem('wf_token');
