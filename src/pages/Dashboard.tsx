@@ -1,16 +1,3 @@
-/**
- * Dashboard.tsx — Main Application Dashboard
- * -----------------------------------------------
- * Renders two views controlled by the `view` prop:
- *   'tracker'  — Live timer, stat cards, and the Work/Break/Idle pie chart
- *   'history'  — Table of the user's last 10 shifts
- *
- * The DonutChart component accepts three segments:
- *   - Work  (green  #22c55e)
- *   - Break (amber  #f59e0b)
- *   - Idle  (slate  #6366f1)
- */
-
 import { useState } from 'react';
 import { useTimer, formatDuration } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
@@ -179,7 +166,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                     <div className="timer-card">
                         {status === 'working' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
-                                <img src="/cctv.gif" alt="CCTV" style={{ width: 50, height:50}} />
+                                <img src="/cctv.gif" alt="CCTV" style={{ width: 50, height: 50 }} />
                                 <span style={{ fontSize: 11, color: 'rgba(239, 68, 68, 0.85)', fontWeight: 600, letterSpacing: '0.02em', textShadow: '0 2px 4px rgba(239, 68, 68, 0.15)' }}>
                                     Your screen is under observation..
                                 </span>
@@ -243,9 +230,10 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                     <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
                         <button
                             className="btn"
-                            onClick={() => window.open('http://localhost:3000/dashboard', '_blank')}
+                            onClick={() => (window.electronAPI as any)?.openDashboard?.()}
                             style={{ flex: 1, padding: '10px', fontSize: 13, background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
                         >
+
                             View Dashboard
                         </button>
                         <button
