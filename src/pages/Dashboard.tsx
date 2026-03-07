@@ -166,10 +166,8 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                     <div className="timer-card">
                         {status === 'working' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
-                                <img src="/cctv.gif" alt="CCTV" style={{ width: 50, height: 50 }} />
-                                <span style={{ fontSize: 11, color: 'rgba(239, 68, 68, 0.85)', fontWeight: 600, letterSpacing: '0.02em', textShadow: '0 2px 4px rgba(239, 68, 68, 0.15)' }}>
-                                    Your screen is under observation..
-                                </span>
+                                <img src="./cctv.gif" alt="CCTV" style={{ width: 50, height: 50 }} />
+                                
                             </div>
                         ) : (
                             <StatusBadge status={status} />
