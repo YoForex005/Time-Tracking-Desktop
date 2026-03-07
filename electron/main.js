@@ -342,7 +342,7 @@ app.whenReady().then(() => {
     // We embed it as ?desktopCode=<uuid> so the website POSTs the session
     // to the backend by that code. The renderer polls the backend every 2s.
     ipcMain.on('open-login', (_event, deviceCode) => {
-        const loginUrl = new URL('http://localhost:3000/login');
+        const loginUrl = new URL('https://hrms.yoforex.net/login');
         loginUrl.searchParams.set('desktopCode', String(deviceCode));
         loginUrl.searchParams.set('returnTo', 'desktop');
         shell.openExternal(loginUrl.toString());
@@ -350,7 +350,7 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('open-dashboard', () => {
-        shell.openExternal('http://localhost:3000/dashboard');
+        shell.openExternal('https://hrms.yoforex.net/dashboard');
         console.log('[Auth] Opened browser dashboard');
     });
 

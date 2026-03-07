@@ -128,7 +128,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             api.openLogin(code);
         } else {
             window.open(
-                `http://localhost:3000/login?desktopCode=${encodeURIComponent(code)}&returnTo=desktop`,
+                `https://hrms.yoforex.net/login?desktopCode=${encodeURIComponent(code)}&returnTo=desktop`,
                 '_blank'
             );
         }
@@ -244,7 +244,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                         </button>
 
                         <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 14 }}>
-                            Opens <strong>localhost:3000/login</strong> in your default browser
+                            Opens <strong>hrms.yoforex.net/login</strong> in your default browser
                         </p>
                     </>
                 )}
