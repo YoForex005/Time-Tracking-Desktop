@@ -23,6 +23,7 @@ const { spawn } = require('child_process');
 const tracker = require('./tracking/tracker');
 const screenshotScheduler = require('./tracking/screenshotScheduler');
 const { URL } = require('url');
+const { autoUpdater } = require('electron-updater');
 
 // ── Custom Protocol (Deep-Link Auth) ──────────────────────────────────────────
 // Register workfolio:// as the app's custom URL scheme so the OS can hand
@@ -307,6 +308,10 @@ app.whenReady().then(() => {
         return tracker.getCurrentData();
     });
 
+    ipcMain.handle('get-app-version', () => {
+        return app.getVersion();
+    });
+
     ipcMain.on('clear-app-usage', () => {
         tracker.clearTrackingData();
     });
@@ -355,6 +360,21 @@ app.whenReady().then(() => {
     });
 
     createWindow();
+
+    // ── OTA Updates ───────────────────────────────────────────────────────────
+    // Check for updates immediately on start. electron-updater will automatically
+    // download updates in the background if found.
+    autoUpdater.checkForUpdatesAndNotify();
+
+    autoUpdater.on('update-available', () => {
+        console.log('[OTA] Update available. Downloading in background...');
+    });
+
+    autoUpdater.on('update-downloaded', () => {
+        console.log('[OTA] Update downloaded. App will restart to install.');
+        // This will quit the app and install the update immediately.
+        autoUpdater.quitAndInstall();
+    });
 
     startIdlePolling();        // begin monitoring system idle time
     startScreenLockDetection(); // begin monitoring screen lock/unlock

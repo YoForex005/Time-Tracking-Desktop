@@ -1,7 +1,7 @@
 {
   "name": "workfolio-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -10,12 +10,14 @@
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "build": "tsc -b && vite build",
     "electron:build": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "electron:publish": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win -p always",
     "preview": "vite preview"
   },
   "dependencies": {
     "active-win": "^7.7.2",
     "axios": "^1.13.5",
     "electron-store": "^11.0.2",
+    "electron-updater": "^6.8.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.1"
@@ -42,6 +44,14 @@
   "build": {
     "appId": "com.yohrmx.timetracker",
     "productName": "YO HRMX",
+    "icon": "build/icon.png",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "YoForex005",
+        "repo": "Time-Tracking-Desktop"
+      }
+    ],
     "directories": {
       "output": "release"
     },

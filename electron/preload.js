@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeAllListeners('app-tracker-update');
     },
     getAppUsage: () => ipcRenderer.invoke('get-app-usage'),
+    getAppVersion: () => ipcRenderer.invoke('get-app-version'),
     clearAppUsage: () => ipcRenderer.send('clear-app-usage'),
     setTrackerAuthToken: (token) => ipcRenderer.send('set-tracker-auth-token', token),
     clearTrackerAuthToken: () => ipcRenderer.send('clear-tracker-auth-token'),

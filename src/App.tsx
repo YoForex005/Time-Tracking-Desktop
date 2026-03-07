@@ -34,6 +34,15 @@ function App() {
 
     const [user, setUser] = useState<User | null>(getSavedUser());
     const [token, setToken] = useState<string | null>(savedToken);
+    const [version, setVersion] = useState<string>('');
+
+    // Fetch app version on mount
+    useEffect(() => {
+        const api = (window as any).electronAPI;
+        if (api?.getAppVersion) {
+            api.getAppVersion().then((v: string) => setVersion(v));
+        }
+    }, []);
 
     // Keep Electron tracker auth token in sync with login/logout state.
     useEffect(() => {
@@ -83,6 +92,7 @@ function App() {
             <>
                 <Titlebar userName="Guest" />
                 <LoginPage onLogin={handleLogin} />
+                {version && <div className="version-tag">v{version}</div>}
             </>
         );
     }
@@ -91,6 +101,7 @@ function App() {
         <>
             <Titlebar userName={user.name} />
             <Dashboard view="tracker" onLogout={handleLogout} />
+            {version && <div className="version-tag">v{version}</div>}
         </>
     );
 }

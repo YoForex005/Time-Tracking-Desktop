@@ -786,3 +786,18 @@ body::after {
 .modal__btn--danger:hover {
   background: #dc2626;
 }
+/* --- Version Tag ----------------------------------------- */
+.version-tag {
+  position: fixed;
+  bottom: 12px;
+  right: 16px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 9999;
+  letter-spacing: 0.5px;
+  font-family: 'Inter', monospace;
+  text-transform: lowercase;
+}
