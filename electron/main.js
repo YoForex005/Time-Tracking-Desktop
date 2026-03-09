@@ -19,6 +19,7 @@ process.noDeprecation = true; // Hides non-critical node warnings (like url.pars
 
 const { app, BrowserWindow, ipcMain, powerMonitor, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const axios = require('axios');
 const path = require('path');
 const { spawn } = require('child_process');
 const tracker = require('./tracking/tracker');
@@ -46,6 +47,7 @@ if (!gotSingleInstanceLock) {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+const API_BASE = process.env.API_BASE || 'https://hrmsbackend.yoforex.net/api';
 
 /**
  * Idle threshold in seconds — mutable so the renderer can push the
@@ -69,6 +71,42 @@ const IDLE_POLL_INTERVAL_MS = 1_000; // 1 second
 let mainWindow = null;
 let backendProcess = null;
 let pendingAuthCallbackUrl = null;
+let sessionAuthToken = null;
+let disconnectIntentSent = false;
+
+function normalizeAuthToken(token) {
+    if (typeof token !== 'string') return null;
+    const normalized = token.trim().replace(/^Bearer\s+/i, '');
+    return normalized || null;
+}
+
+async function sendDisconnectIntent(reason) {
+    if (!sessionAuthToken) return;
+    if (disconnectIntentSent) return;
+
+    disconnectIntentSent = true;
+
+    try {
+        await axios.post(
+            `${API_BASE}/time/disconnect-intent`,
+            {
+                reason: reason || 'desktop_exit',
+                disconnectedAt: new Date().toISOString(),
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${sessionAuthToken}`,
+                },
+                timeout: 3000,
+            }
+        );
+        console.log('[Session] Disconnect intent sent to backend');
+    } catch (err) {
+        const message = err && err.message ? err.message : 'unknown error';
+        console.warn('[Session] Failed to send disconnect intent:', message);
+    }
+}
 
 // ── OTA Updates (Configuration) ──────────────────────────────────────────────
 
@@ -367,11 +405,15 @@ app.whenReady().then(() => {
         if (typeof token !== 'string') return;
         tracker.setAuthToken(token);
         screenshotScheduler.setAuthToken(token);
+        sessionAuthToken = normalizeAuthToken(token);
+        disconnectIntentSent = false;
     });
 
     ipcMain.on('clear-tracker-auth-token', () => {
         tracker.clearAuthToken();
         screenshotScheduler.clearAuthToken();
+        sessionAuthToken = null;
+        disconnectIntentSent = false;
     });
 
     // ── IPC: Dynamic Idle Threshold (NEW — Admin Portal) ─────────────────────
@@ -431,6 +473,14 @@ app.whenReady().then(() => {
 
     startIdlePolling();        // begin monitoring system idle time
     startScreenLockDetection(); // begin monitoring screen lock/unlock
+
+    app.on('before-quit', () => {
+        void sendDisconnectIntent('before_quit');
+    });
+
+    powerMonitor.on('shutdown', () => {
+        void sendDisconnectIntent('system_shutdown');
+    });
 
     // On Windows/Linux cold-start via protocol, deep link is passed in argv.
     const startupDeepLink = extractDeepLink(process.argv);

@@ -17,7 +17,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-    getStatus, startShift, toggleBreak, stopShift, getHistory,
+    getStatus, startShift, toggleBreak, stopShift, getHistory, sendHeartbeat,
     startIdleSession, endIdleSession, getTodayIdleSecs,
     subscribeToThresholdEvents,
 } from '../api';
@@ -31,6 +31,10 @@ export interface HistoryShift {
     id: string;
     startTime: string;
     endTime: string | null;
+    checkoutType?: 'manual' | 'auto_shutdown';
+    checkoutReason?: string | null;
+    graceAppliedSecs?: number;
+    timeAdjustmentSecs?: number;
     breaks: Array<{ id: string; startTime: string; endTime: string | null }>;
 }
 
@@ -247,6 +251,27 @@ export function useTimer() {
         return () => clearInterval(interval);
     }, [fetchStatus]);
 
+    // Keep the active shift alive. If the app reconnects within 5 minutes,
+    // backend clears pending disconnect and keeps the same shift running.
+    useEffect(() => {
+        if (status !== 'working' && status !== 'on_break') return;
+
+        const tickHeartbeat = async () => {
+            try {
+                await sendHeartbeat();
+            } catch (err) {
+                console.warn('[Heartbeat] Failed to ping backend:', err);
+            }
+        };
+
+        void tickHeartbeat(); // run immediately on state change
+        const interval = window.setInterval(() => {
+            void tickHeartbeat();
+        }, 20_000);
+
+        return () => clearInterval(interval);
+    }, [status]);
+
 
     // ── Real-time idle threshold sync (SSE) ─────────────────────────────────
     // Subscribes to the backend SSE stream on mount.
@@ -435,6 +460,15 @@ export function useTimer() {
         : 0;
     const todayIdleSecs = closedIdleSecs + liveActiveSecs;
 
+    const latestCompletedShift = history.find((s) => s.endTime !== null);
+    const autoCheckoutNotice =
+        latestCompletedShift?.checkoutType === 'auto_shutdown'
+            ? latestCompletedShift.checkoutReason
+                ?? (latestCompletedShift.timeAdjustmentSecs && latestCompletedShift.timeAdjustmentSecs > 0
+                    ? 'Clocked out automatically via shutdown/disconnect. 5 minutes grace was credited.'
+                    : 'Clocked out automatically via shutdown/disconnect.')
+            : '';
+
     // ── Actions ───────────────────────────────────────────────────────────────
 
     const handleStart = async () => {
@@ -548,5 +582,6 @@ export function useTimer() {
         expectedWorkSecs,     // org-wide expected total shift length
         expectedActiveSecs,   // org-wide expected active (non-idle) time
         maxBreaks,            // org-wide max breaks per shift (admin-configurable)
+        autoCheckoutNotice,   // latest checkout note if shift was auto-closed via shutdown/disconnect
     };
 }

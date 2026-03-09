@@ -94,7 +94,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         status, loading, actionLoading, error,
         handleStart, handleBreak, handleStop,
         todayWorked, todayBreakSecs: _todayBreakSecs, todayBreaksCount, todayIdleSecs,
-        expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks,
+        expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks, autoCheckoutNotice,
     } = useTimer();
 
     // Checkout warning modal
@@ -182,6 +182,23 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             {status === 'working' && 'Shift in progress — take a break or check out when done'}
                             {status === 'on_break' && "Break in progress — resume when you're ready"}
                         </div>
+
+                        {autoCheckoutNotice && (
+                            <div
+                                style={{
+                                    marginTop: 10,
+                                    background: 'rgba(59, 130, 246, 0.08)',
+                                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                                    color: '#1d4ed8',
+                                    borderRadius: 8,
+                                    padding: '8px 10px',
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                }}
+                            >
+                                {autoCheckoutNotice}
+                            </div>
+                        )}
 
                         {error && <div className="form-error" style={{ width: '100%', textAlign: 'center' }}>{error}</div>}
 

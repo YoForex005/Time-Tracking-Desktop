@@ -89,6 +89,11 @@ export async function stopShift() {
     return handleResponse(res);
 }
 
+export async function sendHeartbeat() {
+    const res = await fetch(`${API_BASE}/time/heartbeat`, { method: 'POST', headers: authHeaders() });
+    return handleResponse(res);
+}
+
 export async function getHistory() {
     const res = await fetch(`${API_BASE}/time/history`, { headers: authHeaders() });
     const data = await handleResponse(res);
@@ -96,6 +101,10 @@ export async function getHistory() {
         id: string;
         startTime: string;
         endTime: string | null;
+        checkoutType?: 'manual' | 'auto_shutdown';
+        checkoutReason?: string | null;
+        graceAppliedSecs?: number;
+        timeAdjustmentSecs?: number;
         breaks: Array<{ id: string; startTime: string; endTime: string | null }>;
     }>;
 }
