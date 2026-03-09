@@ -786,18 +786,146 @@ body::after {
 .modal__btn--danger:hover {
   background: #dc2626;
 }
-/* --- Version Tag ----------------------------------------- */
+
+/* --- Update Progress & Version Tag ----------------------- */
+/* --- Update Progress & Version Tag ----------------------- */
 .version-tag {
   position: fixed;
   bottom: 12px;
   right: 16px;
-  font-size: 10px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-muted);
-  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(4px);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  opacity: 0.8;
   pointer-events: none;
   z-index: 9999;
   letter-spacing: 0.5px;
   font-family: 'Inter', monospace;
   text-transform: lowercase;
+}
+
+
+/* --- Update Banner --------------------------------------- */
+.update-banner {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(16, 185, 129, 0.95);
+  backdrop-filter: blur(12px);
+  color: white;
+  padding: 12px 20px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  z-index: 10000;
+  box-shadow: 0 12px 32px rgba(16, 185, 129, 0.3);
+  animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.update-banner__content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.update-banner__icon {
+  font-size: 20px;
+}
+
+.update-banner__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.update-banner__text strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.update-banner__text span {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.update-banner__btn {
+  background: white !important;
+  color: var(--success) !important;
+  padding: 8px 16px !important;
+  font-size: 11px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+  min-width: 100px;
+}
+
+
+/* --- Restart Overlay -------------------------------------- */
+.restart-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20000;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.restart-overlay__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  color: white;
+  text-align: center;
+}
+
+.restart-overlay__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.restart-overlay__text strong {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.restart-overlay__text span {
+  font-size: 14px;
+  opacity: 0.6;
+}
+
+/* Reuse spinner if not exists, otherwise simple one */
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--success);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

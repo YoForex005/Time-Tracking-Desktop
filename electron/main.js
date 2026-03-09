@@ -18,12 +18,12 @@
 process.noDeprecation = true; // Hides non-critical node warnings (like url.parse)
 
 const { app, BrowserWindow, ipcMain, powerMonitor, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { spawn } = require('child_process');
 const tracker = require('./tracking/tracker');
 const screenshotScheduler = require('./tracking/screenshotScheduler');
 const { URL } = require('url');
-const { autoUpdater } = require('electron-updater');
 
 // ── Custom Protocol (Deep-Link Auth) ──────────────────────────────────────────
 // Register workfolio:// as the app's custom URL scheme so the OS can hand
@@ -69,6 +69,21 @@ const IDLE_POLL_INTERVAL_MS = 1_000; // 1 second
 let mainWindow = null;
 let backendProcess = null;
 let pendingAuthCallbackUrl = null;
+
+// ── OTA Updates (Configuration) ──────────────────────────────────────────────
+
+autoUpdater.autoDownload = true; // Download silently in the background
+autoUpdater.allowPrerelease = false;
+
+// Configure logging for updates
+autoUpdater.logger = console;
+
+function sendOtaStatus(message) {
+    console.log(`[OTA] ${message}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ota-status', message);
+    }
+}
 
 /**
  * Whether the user is currently considered idle.
@@ -287,6 +302,38 @@ function createWindow() {
         screenshotScheduler.stop();
         mainWindow = null;
     });
+
+    // ── OTA Listeners ────────────────────────────────────────────────────────
+
+    autoUpdater.on('checking-for-update', () => {
+        sendOtaStatus('Checking for update...');
+    });
+
+    autoUpdater.on('update-available', (info) => {
+        sendOtaStatus(`Update v${info.version} available. Downloading...`);
+    });
+
+    autoUpdater.on('update-not-available', () => {
+        sendOtaStatus('App is up to date.');
+    });
+
+    autoUpdater.on('error', (err) => {
+        sendOtaStatus(`Update error: ${err.message}`);
+    });
+
+    autoUpdater.on('download-progress', (progressObj) => {
+        const msg = `Downloading: ${Math.round(progressObj.percent)}%`;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ota-status', msg);
+        }
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+        sendOtaStatus('Update ready to install.');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ota-update-ready', info.version);
+        }
+    });
 }
 
 // ── App Lifecycle ─────────────────────────────────────────────────────────────
@@ -304,8 +351,8 @@ app.whenReady().then(() => {
     });
 
     // ── IPC: App Tracker ──────────────────────────────────────────────────────
-    ipcMain.handle('get-app-usage', () => {
-        return tracker.getCurrentData();
+    ipcMain.handle('get-app-usage', async () => {
+        return usageMonitor.getUsageData();
     });
 
     ipcMain.handle('get-app-version', () => {
@@ -359,22 +406,28 @@ app.whenReady().then(() => {
         console.log('[Auth] Opened browser dashboard');
     });
 
+    ipcMain.on('restart-app', () => {
+        console.log('[OTA] Restart and install triggered');
+        // quitAndInstall(isSilent, isForceRunAfter)
+        autoUpdater.quitAndInstall(true, true);
+    });
+
     createWindow();
 
-    // ── OTA Updates ───────────────────────────────────────────────────────────
-    // Check for updates immediately on start. electron-updater will automatically
-    // download updates in the background if found.
-    autoUpdater.checkForUpdatesAndNotify();
+    // ── OTA Check Logic ──────────────────────────────────────────────────────
 
-    autoUpdater.on('update-available', () => {
-        console.log('[OTA] Update available. Downloading in background...');
-    });
+    // 1. Check immediately on startup (after window is ready)
+    setTimeout(() => {
+        console.log('[OTA] Running initial startup check...');
+        autoUpdater.checkForUpdates().catch(err => console.error('[OTA] Startup check failed:', err));
+    }, 5000);
 
-    autoUpdater.on('update-downloaded', () => {
-        console.log('[OTA] Update downloaded. App will restart to install.');
-        // This will quit the app and install the update immediately.
-        autoUpdater.quitAndInstall();
-    });
+    // 2. Periodic background check every 60 minutes
+    const ONE_HOUR = 60 * 60 * 1000;
+    setInterval(() => {
+        console.log('[OTA] Running periodic hourly check...');
+        autoUpdater.checkForUpdates().catch(err => console.error('[OTA] Periodic check failed:', err));
+    }, ONE_HOUR);
 
     startIdlePolling();        // begin monitoring system idle time
     startScreenLockDetection(); // begin monitoring screen lock/unlock

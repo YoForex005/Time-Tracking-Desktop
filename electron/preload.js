@@ -104,6 +104,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onAuthCallback: (callback) => {
         ipcRenderer.on('auth-callback', (_event, payload) => callback(payload));
     },
+    onOtaStatus: (callback) => {
+        ipcRenderer.on('ota-status', (_event, status) => callback(status));
+    },
+    onUpdateReady: (callback) => {
+        ipcRenderer.on('ota-update-ready', (_event, version) => callback(version));
+    },
+    restartApp: () => ipcRenderer.send('restart-app'),
     removeAuthCallbackListeners: () => {
         ipcRenderer.removeAllListeners('auth-callback');
     },

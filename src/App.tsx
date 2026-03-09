@@ -35,6 +35,11 @@ function App() {
     const [user, setUser] = useState<User | null>(getSavedUser());
     const [token, setToken] = useState<string | null>(savedToken);
     const [version, setVersion] = useState<string>('');
+    const [otaStatus, setOtaStatus] = useState<string>('');
+    const [readyVersion, setReadyVersion] = useState<string>('');
+    const [isRestarting, setIsRestarting] = useState<boolean>(false);
+    const [updatePhase, setUpdatePhase] = useState<'idle' | 'downloading' | 'installing' | 'ready'>('idle');
+    const [otaProgress, setOtaProgress] = useState<number>(0);
 
     // Fetch app version on mount
     useEffect(() => {
@@ -42,7 +47,52 @@ function App() {
         if (api?.getAppVersion) {
             api.getAppVersion().then((v: string) => setVersion(v));
         }
+
+        if (api?.onOtaStatus) {
+            api.onOtaStatus((status: string) => {
+                setOtaStatus(status);
+
+                if (status.startsWith('Downloading:')) {
+                    setUpdatePhase('downloading');
+                    const percent = parseInt(status.match(/\d+/)?.[0] || '0');
+                    setOtaProgress(percent);
+                }
+
+                if (status.includes('ready to install')) {
+                    setUpdatePhase('installing');
+                    let simProgress = 0;
+                    const interval = setInterval(() => {
+                        simProgress += 2;
+                        setOtaProgress(simProgress);
+                        if (simProgress >= 100) {
+                            clearInterval(interval);
+                            setUpdatePhase('ready');
+                        }
+                    }, 50); // ~2.5 seconds of professional installation feedback
+                }
+
+                if (status.includes('up to date')) {
+                    setTimeout(() => setOtaStatus(''), 5000);
+                }
+            });
+        }
+
+        if (api?.onUpdateReady) {
+            api.onUpdateReady((v: string) => {
+                setReadyVersion(v);
+            });
+        }
     }, []);
+
+    const handleRestart = () => {
+        setIsRestarting(true);
+        setTimeout(() => {
+            const api = (window as any).electronAPI;
+            if (api?.restartApp) {
+                api.restartApp();
+            }
+        }, 2000);
+    };
 
     // Keep Electron tracker auth token in sync with login/logout state.
     useEffect(() => {
@@ -92,7 +142,9 @@ function App() {
             <>
                 <Titlebar userName="Guest" />
                 <LoginPage onLogin={handleLogin} />
-                {version && <div className="version-tag">v{version}</div>}
+                {version && (
+                    <div className="version-tag">v{version}</div>
+                )}
             </>
         );
     }
@@ -101,7 +153,47 @@ function App() {
         <>
             <Titlebar userName={user.name} />
             <Dashboard view="tracker" onLogout={handleLogout} />
-            {version && <div className="version-tag">v{version}</div>}
+
+            {version && (
+                <div className="version-tag">
+                    {updatePhase !== 'idle' && updatePhase !== 'ready' && (
+                        <span style={{ marginRight: '8px', opacity: 0.8 }}>
+                            {updatePhase === 'downloading' ? `downloading: ${otaProgress}%` : `installing: ${otaProgress}%`} |
+                        </span>
+                    )}
+                    {otaStatus && updatePhase === 'idle' && !readyVersion && (
+                        <span style={{ marginRight: '8px', opacity: 0.8 }}>{otaStatus.toLowerCase()} |</span>
+                    )}
+                    v{version}
+                </div>
+            )}
+
+            {updatePhase === 'ready' && readyVersion && (
+                <div className="update-banner">
+                    <div className="update-banner__content">
+                        <span className="update-banner__icon">🚀</span>
+                        <div className="update-banner__text">
+                            <strong>Update Ready!</strong>
+                            <span>Version {readyVersion} is staged and ready to install.</span>
+                        </div>
+                    </div>
+                    <button className="btn btn-success update-banner__btn" onClick={handleRestart}>
+                        Restart Now
+                    </button>
+                </div>
+            )}
+
+            {isRestarting && (
+                <div className="restart-overlay">
+                    <div className="restart-overlay__content">
+                        <div className="spinner"></div>
+                        <div className="restart-overlay__text">
+                            <strong>Restarting & Updating</strong>
+                            <span>Please wait a moment...</span>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 }
