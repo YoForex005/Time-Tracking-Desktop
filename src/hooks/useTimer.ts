@@ -55,9 +55,12 @@ declare global {
             onScreenUnlocked: (cb: () => void) => void;
             removeScreenListeners: () => void;
             // Sleep / Resume detection (SEPARATE from shutdown → clock-out)
-            onSleepStart: (cb: () => void) => void;
-            onSleepEnd: (cb: () => void) => void;
+            // Main.js calls the API directly; renderer just re-syncs UI.
+            onSleepBreakStarted: (cb: () => void) => void;
+            onSleepBreakEnded: (cb: (ok: boolean) => void) => void;
             removeSleepListeners: () => void;
+            // Shift status sync to main process
+            updateShiftStatus: (status: string) => void;
             // Tracker auth
             setTrackerAuthToken: (token: string) => void;
             clearTrackerAuthToken: () => void;
@@ -137,17 +140,6 @@ export function useTimer() {
     // are NEVER auto-ended on unlock.
     const lockBreakRef = useRef(false);
 
-    // ── Sleep state ───────────────────────────────────────────────────────────
-    // `sleepBreakRef` = true when the current break was automatically started
-    // by a system sleep (suspend) event. Only this ref triggers auto-end on wake.
-    // Completely separate from lockBreakRef and the shutdown → clock-out flow.
-    const sleepBreakRef = useRef(false);
-
-    // `breakLimitReachedRef` = always reflects whether todayBreaksCount >= maxBreaks.
-    // Used inside the sleep IPC effect (which is registered before todayBreaksCount
-    // is declared) to safely read the current limit status without a stale closure.
-    const breakLimitReachedRef = useRef(false);
-
     // ── Tick: forces re-render every second when shift is active ──────────────
     const [tick, setTick] = useState(0);
     const tickRef = useRef<number | null>(null);
@@ -200,10 +192,31 @@ export function useTimer() {
 
 
         } catch {
-            setStatus('stopped');
-            setCurrentShift(null);
+            // Do NOT reset status/shift on network errors.
+            // If the backend is temporarily unreachable (e.g. network reconnecting
+            // after sleep), wiping the UI would show NOT CLOCKED IN even though
+            // the shift is still active. Silently ignore and keep last known state.
+            console.warn('[Status] fetchStatus failed — keeping last known state');
         }
     }, []);
+
+    /**
+     * Retries fetchStatus up to `maxAttempts` times with a `delayMs` gap.
+     * Used after system wake so we wait for the network to reconnect before
+     * syncing — prevents the "NOT CLOCKED IN" flash caused by an early failed fetch.
+     */
+    const fetchStatusWithRetry = useCallback(async (maxAttempts = 5, delayMs = 2000) => {
+        for (let i = 0; i < maxAttempts; i++) {
+            try {
+                await fetchStatus();
+                return; // success
+            } catch {
+                if (i < maxAttempts - 1) {
+                    await new Promise(r => setTimeout(r, delayMs));
+                }
+            }
+        }
+    }, [fetchStatus]);
 
 
     const fetchHistory = useCallback(async () => {
@@ -287,6 +300,15 @@ export function useTimer() {
         return () => clearInterval(interval);
     }, [status]);
 
+
+    // ── Shift status sync to main process ──────────────────────────────────────
+    // Keep main.js informed so it can guard the sleep break correctly.
+    // Main.js needs to know 'working' before suspend fires to call the API.
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api || !('updateShiftStatus' in api)) return;
+        (api as unknown as { updateShiftStatus: (s: string) => void }).updateShiftStatus(status);
+    }, [status]);
 
     // ── Real-time idle threshold sync (SSE) ─────────────────────────────────
     // Subscribes to the backend SSE stream on mount.
@@ -418,78 +440,32 @@ export function useTimer() {
     }, [status, fetchStatus, fetchHistory]);
 
     // ── Sleep / Resume Listeners (Electron IPC) ────────────────────────────────
-    // When the system goes to sleep (suspend):
-    //   • If working AND below break limit → auto-start a break + set sleepBreakRef
-    //   • If already on break, at break limit, or not clocked in → do nothing
-    // When the system wakes (resume):
-    //   • If sleepBreakRef is set → auto-end the break + clear flag
+    // Main.js already called the backend API before the network dropped.
+    // Here the renderer just re-syncs its UI state from the backend.
     //
-    // ⚠️ This is INDEPENDENT from the shutdown → disconnect-intent → auto-checkout flow.
-    //    'suspend' and 'shutdown' are different OS events and must never be mixed.
+    // ⚠️ INDEPENDENT from shutdown → disconnect-intent → auto-checkout.
 
     useEffect(() => {
         const api = window.electronAPI;
         if (!api) return;
 
-        api.onSleepStart(async () => {
-            console.log('[Sleep] System suspending');
-
-            // Guard 1: only start break if actively working
-            if (status !== 'working') {
-                console.log('[Sleep] Not working — skipping sleep break');
-                return;
-            }
-
-            // Guard 2: only start break if below the admin-configured break limit
-            // Uses breakLimitReachedRef (a ref) to avoid reading todayBreaksCount
-            // before it is declared in the hook body.
-            if (breakLimitReachedRef.current) {
-                console.log('[Sleep] Break limit reached — skipping sleep break');
-                return;
-            }
-
-            // Close any open idle session first (sleep ends idle tracking)
-            setIdleSessionStartTime(null);
-            await endIdleSession().catch(() => { /* No idle session open — safe to ignore */ });
-
-            // Mark this break as sleep-initiated so we know to auto-resume on wake
-            sleepBreakRef.current = true;
-
-            console.log('[Sleep] Auto-starting break due to system sleep');
-            try {
-                await toggleBreak();
-                await fetchStatus();
-                await fetchHistory();
-            } catch (e) {
-                console.warn('[Sleep] Failed to start break on sleep:', e);
-                sleepBreakRef.current = false; // reset flag if API call failed
-            }
+        api.onSleepBreakStarted(async () => {
+            console.log('[Sleep] Main process started break on sleep — re-syncing UI');
+            await fetchStatus();
+            await fetchHistory();
         });
 
-        api.onSleepEnd(async () => {
-            console.log('[Sleep] System resumed from sleep');
-
-            // Only auto-resume if THIS break was started by sleep
-            if (!sleepBreakRef.current) {
-                console.log('[Sleep] Break was not sleep-initiated — leaving break running');
-                return;
-            }
-
-            // Clear flag before API call to prevent double-triggering
-            sleepBreakRef.current = false;
-
-            console.log('[Sleep] Auto-ending break due to system wake');
-            try {
-                await toggleBreak();
-                await fetchStatus();
-                await fetchHistory();
-            } catch (e) {
-                console.warn('[Sleep] Failed to end break on wake:', e);
-            }
+        api.onSleepBreakEnded(async (ok: boolean) => {
+            console.log(`[Sleep] Main process ended break on wake (ok=${ok}) — re-syncing UI`);
+            // Use retry: network may take a few seconds to reconnect after sleep.
+            // Without retry the first fetch fails and the UI shows NOT CLOCKED IN.
+            await fetchStatusWithRetry(6, 2000);
+            await fetchHistory();
+            await fetchIdleSecs();
         });
 
         return () => api.removeSleepListeners();
-    }, [status, fetchStatus, fetchHistory]);
+    }, [fetchStatus, fetchStatusWithRetry, fetchHistory, fetchIdleSecs]);
 
     // ── Computed Stats ────────────────────────────────────────────────────────
     // Recalculated on every render (every second when shift is active)
@@ -521,9 +497,6 @@ export function useTimer() {
     const hasOptimisticBreak = !!(currentShift?.breaks.some(b => b.id.startsWith('temp-')));
     const todayBreaksCount = breaksCountFromHistory + (hasOptimisticBreak ? 1 : 0);
 
-    // Keep breakLimitReachedRef in sync on every render so the sleep effect
-    // can read the latest value without a stale closure.
-    breakLimitReachedRef.current = todayBreaksCount >= maxBreaks;
 
     // ── Active shift contribution (recalculated every second via tick) ──────────
     let activeWork = 0;

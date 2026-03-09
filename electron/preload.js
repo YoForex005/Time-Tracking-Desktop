@@ -73,31 +73,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // ── Sleep / Resume Detection ─────────────────────────────────────────────
-    // 'suspend' → system going to sleep (lid close, sleep button, OS power plan)
-    // 'resume'  → system waking back up
+    // Main process calls break API DIRECTLY on suspend/resume (not the renderer).
+    // It then notifies the renderer via these events so the UI can re-sync.
     // NOTE: completely separate from 'shutdown' → that path handles clock-out.
 
     /**
-     * Register a callback triggered when the system goes to sleep.
-     * The renderer will auto-start a break (if working and below break limit).
+     * Fired after main.js successfully POSTed a break-start on system sleep.
+     * Renderer should re-fetch status to update the UI.
      */
-    onSleepStart: (callback) => {
-        ipcRenderer.on('sleep-start', () => callback());
+    onSleepBreakStarted: (callback) => {
+        ipcRenderer.on('sleep-break-started', () => callback());
     },
 
     /**
-     * Register a callback triggered when the system wakes from sleep.
-     * The renderer will end the sleep-initiated break (if one was started).
+     * Fired after main.js POSTed a break-end on system wake.
+     * Renderer should re-fetch status to update the UI.
+     * @param ok - Whether the API call succeeded.
      */
-    onSleepEnd: (callback) => {
-        ipcRenderer.on('sleep-end', () => callback());
+    onSleepBreakEnded: (callback) => {
+        ipcRenderer.on('sleep-break-ended', (_event, ok) => callback(ok));
     },
 
     /** Remove sleep event IPC listeners (call on component unmount). */
     removeSleepListeners: () => {
-        ipcRenderer.removeAllListeners('sleep-start');
-        ipcRenderer.removeAllListeners('sleep-end');
+        ipcRenderer.removeAllListeners('sleep-break-started');
+        ipcRenderer.removeAllListeners('sleep-break-ended');
     },
+
+    /**
+     * Sends current shift status to main process so it can guard the sleep break.
+     * Call on every status change (working / on_break / stopped).
+     */
+    updateShiftStatus: (status) => ipcRenderer.send('update-shift-status', status),
 
     // ── App Tracking (Silent) ────────────────────────────────────────────────
     onAppTrackerUpdate: (callback) => {

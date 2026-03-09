@@ -74,6 +74,12 @@ let pendingAuthCallbackUrl = null;
 let sessionAuthToken = null;
 let disconnectIntentSent = false;
 
+// Tracks the current shift status so main.js can act on sleep/suspend
+// without waiting for the renderer (which may be too slow before network drops).
+// Updated by the renderer via 'update-shift-status' IPC whenever status changes.
+let currentShiftStatus = 'stopped'; // 'stopped' | 'working' | 'on_break'
+let sleepBreakStarted = false;      // true if THIS sleep triggered a break
+
 function normalizeAuthToken(token) {
     if (typeof token !== 'string') return null;
     const normalized = token.trim().replace(/^Bearer\s+/i, '');
@@ -105,6 +111,34 @@ async function sendDisconnectIntent(reason) {
     } catch (err) {
         const message = err && err.message ? err.message : 'unknown error';
         console.warn('[Session] Failed to send disconnect intent:', message);
+    }
+}
+
+/**
+ * Calls the break-toggle endpoint directly from main.js.
+ * Used on sleep/resume so the request fires BEFORE the network drops.
+ * Returns true if the request succeeded.
+ */
+async function sendBreakToggle(context) {
+    if (!sessionAuthToken) return false;
+    try {
+        await axios.post(
+            `${API_BASE}/time/break`,
+            {},
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${sessionAuthToken}`,
+                },
+                timeout: 4000,
+            }
+        );
+        console.log(`[Sleep] Break toggle sent from main process (${context})`);
+        return true;
+    } catch (err) {
+        const message = err && err.message ? err.message : 'unknown error';
+        console.warn(`[Sleep] Failed to toggle break (${context}):`, message);
+        return false;
     }
 }
 
@@ -417,6 +451,16 @@ app.whenReady().then(() => {
         disconnectIntentSent = false;
     });
 
+    // ── IPC: Shift Status Sync ────────────────────────────────────────────────
+    // Renderer sends current shift status on every change so main.js always
+    // knows whether the user is working/on_break/stopped before a suspend fires.
+    ipcMain.on('update-shift-status', (_event, status) => {
+        if (typeof status === 'string') {
+            currentShiftStatus = status;
+            console.log(`[Sleep] Shift status updated to '${currentShiftStatus}'`);
+        }
+    });
+
     // ── IPC: Dynamic Idle Threshold (NEW — Admin Portal) ─────────────────────
     // Called by the renderer after login with the admin-set value for this user.
     ipcMain.on('set-idle-threshold', (_event, seconds) => {
@@ -484,26 +528,51 @@ app.whenReady().then(() => {
     });
 
     // ── Sleep / Resume Detection ─────────────────────────────────────────────
-    // 'suspend' → PC going to sleep (lid close, sleep button, OS idle sleep)
-    // 'resume'  → PC waking up from sleep
+    // IMPORTANT: These are SEPARATE from 'shutdown':
+    //   shutdown → disconnect-intent → 5-min grace → auto clock-out (unchanged)
+    //   suspend  → break toggle called DIRECTLY via axios (no renderer involvement)
+    //   resume   → break toggle called DIRECTLY via axios to end the sleep break
     //
-    // These are SEPARATE from 'shutdown' and must never mix:
-    //   shutdown → disconnect-intent → 5-min grace → auto clock-out
-    //   suspend  → auto break start  (renderer handles it)
-    //   resume   → auto break end    (renderer handles it)
-    powerMonitor.on('suspend', () => {
-        console.log('[Power] System suspending (sleep) — notifying renderer to start break');
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('sleep-start');
+    // We call the API from main.js (not the renderer) because the network
+    // is still available at this point, whereas the renderer's async HTTP
+    // call often fails after the network drops during suspend.
+    powerMonitor.on('suspend', async () => {
+        console.log('[Sleep] System suspending');
+
+        // Only auto-break if the user is actively working and below limit.
+        // Break limit check is skipped here (backend enforces it anyway and
+        // will return 400 if exceeded — we check the result).
+        if (currentShiftStatus !== 'working') {
+            console.log(`[Sleep] Status is '${currentShiftStatus}' — skipping sleep break`);
+            return;
+        }
+
+        const ok = await sendBreakToggle('suspend');
+        sleepBreakStarted = ok; // only set flag if the API call succeeded
+
+        // Also tell the renderer so the UI reflects the break immediately
+        if (ok && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sleep-break-started');
         }
     });
 
-    powerMonitor.on('resume', () => {
-        console.log('[Power] System resumed from sleep — notifying renderer to end break');
+    powerMonitor.on('resume', async () => {
+        console.log('[Sleep] System resumed from sleep');
+
+        if (!sleepBreakStarted) {
+            console.log('[Sleep] No sleep break was started — nothing to end');
+            return;
+        }
+
+        sleepBreakStarted = false;
+        const ok = await sendBreakToggle('resume');
+
+        // Tell renderer to re-sync status from backend
         if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('sleep-end');
+            mainWindow.webContents.send('sleep-break-ended', ok);
         }
     });
+
 
     // On Windows/Linux cold-start via protocol, deep link is passed in argv.
     const startupDeepLink = extractDeepLink(process.argv);
