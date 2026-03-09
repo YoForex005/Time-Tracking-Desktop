@@ -460,15 +460,6 @@ export function useTimer() {
         : 0;
     const todayIdleSecs = closedIdleSecs + liveActiveSecs;
 
-    const latestCompletedShift = history.find((s) => s.endTime !== null);
-    const autoCheckoutNotice =
-        latestCompletedShift?.checkoutType === 'auto_shutdown'
-            ? latestCompletedShift.checkoutReason
-                ?? (latestCompletedShift.timeAdjustmentSecs && latestCompletedShift.timeAdjustmentSecs > 0
-                    ? 'Clocked out automatically via shutdown/disconnect. 5 minutes grace was credited.'
-                    : 'Clocked out automatically via shutdown/disconnect.')
-            : '';
-
     // ── Actions ───────────────────────────────────────────────────────────────
 
     const handleStart = async () => {
@@ -582,6 +573,5 @@ export function useTimer() {
         expectedWorkSecs,     // org-wide expected total shift length
         expectedActiveSecs,   // org-wide expected active (non-idle) time
         maxBreaks,            // org-wide max breaks per shift (admin-configurable)
-        autoCheckoutNotice,   // latest checkout note if shift was auto-closed via shutdown/disconnect
     };
 }
