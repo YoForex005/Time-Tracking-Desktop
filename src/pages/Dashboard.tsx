@@ -158,7 +158,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             color: 'var(--text-secondary)',
                             textTransform: 'uppercase'
                         }}>
-                            Yo HRMX
+                            Yo HRMS
                         </div>
                     </div>
 

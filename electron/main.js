@@ -523,6 +523,18 @@ app.whenReady().then(() => {
         void sendDisconnectIntent('before_quit');
     });
 
+    // ── OTA: Kill backend before update installs ──────────────────────────────
+    // electron-updater fires this event just before quitAndInstall() hands
+    // control to the installer. Killing the backend here frees any file locks
+    // so Windows can overwrite the core files during the update.
+    app.on('before-quit-for-update', () => {
+        console.log('[OTA] Quitting for update — stopping backend process');
+        if (backendProcess) {
+            backendProcess.kill();
+            backendProcess = null;
+        }
+    });
+
     powerMonitor.on('shutdown', () => {
         void sendDisconnectIntent('system_shutdown');
     });
