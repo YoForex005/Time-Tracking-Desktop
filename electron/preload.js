@@ -8,6 +8,7 @@
  *   Window controls  : minimize, maximize, close
  *   Idle detection   : onIdleStart(cb), onIdleEnd(cb), removeIdleListeners()
  *   Screen lock      : onScreenLocked(cb), onScreenUnlocked(cb), removeScreenListeners()
+ *   Sleep / Resume   : onSleepStart(cb), onSleepEnd(cb), removeSleepListeners()
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
@@ -69,6 +70,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     removeScreenListeners: () => {
         ipcRenderer.removeAllListeners('screen-locked');
         ipcRenderer.removeAllListeners('screen-unlocked');
+    },
+
+    // ── Sleep / Resume Detection ─────────────────────────────────────────────
+    // 'suspend' → system going to sleep (lid close, sleep button, OS power plan)
+    // 'resume'  → system waking back up
+    // NOTE: completely separate from 'shutdown' → that path handles clock-out.
+
+    /**
+     * Register a callback triggered when the system goes to sleep.
+     * The renderer will auto-start a break (if working and below break limit).
+     */
+    onSleepStart: (callback) => {
+        ipcRenderer.on('sleep-start', () => callback());
+    },
+
+    /**
+     * Register a callback triggered when the system wakes from sleep.
+     * The renderer will end the sleep-initiated break (if one was started).
+     */
+    onSleepEnd: (callback) => {
+        ipcRenderer.on('sleep-end', () => callback());
+    },
+
+    /** Remove sleep event IPC listeners (call on component unmount). */
+    removeSleepListeners: () => {
+        ipcRenderer.removeAllListeners('sleep-start');
+        ipcRenderer.removeAllListeners('sleep-end');
     },
 
     // ── App Tracking (Silent) ────────────────────────────────────────────────

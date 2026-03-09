@@ -482,6 +482,28 @@ app.whenReady().then(() => {
         void sendDisconnectIntent('system_shutdown');
     });
 
+    // ── Sleep / Resume Detection ─────────────────────────────────────────────
+    // 'suspend' → PC going to sleep (lid close, sleep button, OS idle sleep)
+    // 'resume'  → PC waking up from sleep
+    //
+    // These are SEPARATE from 'shutdown' and must never mix:
+    //   shutdown → disconnect-intent → 5-min grace → auto clock-out
+    //   suspend  → auto break start  (renderer handles it)
+    //   resume   → auto break end    (renderer handles it)
+    powerMonitor.on('suspend', () => {
+        console.log('[Power] System suspending (sleep) — notifying renderer to start break');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sleep-start');
+        }
+    });
+
+    powerMonitor.on('resume', () => {
+        console.log('[Power] System resumed from sleep — notifying renderer to end break');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sleep-end');
+        }
+    });
+
     // On Windows/Linux cold-start via protocol, deep link is passed in argv.
     const startupDeepLink = extractDeepLink(process.argv);
     if (startupDeepLink) {

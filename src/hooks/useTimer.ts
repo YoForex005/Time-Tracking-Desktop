@@ -54,6 +54,10 @@ declare global {
             onScreenLocked: (cb: () => void) => void;
             onScreenUnlocked: (cb: () => void) => void;
             removeScreenListeners: () => void;
+            // Sleep / Resume detection (SEPARATE from shutdown → clock-out)
+            onSleepStart: (cb: () => void) => void;
+            onSleepEnd: (cb: () => void) => void;
+            removeSleepListeners: () => void;
             // Tracker auth
             setTrackerAuthToken: (token: string) => void;
             clearTrackerAuthToken: () => void;
@@ -132,6 +136,17 @@ export function useTimer() {
     // Manual breaks (user clicked "Take Break") leave this as false, so they
     // are NEVER auto-ended on unlock.
     const lockBreakRef = useRef(false);
+
+    // ── Sleep state ───────────────────────────────────────────────────────────
+    // `sleepBreakRef` = true when the current break was automatically started
+    // by a system sleep (suspend) event. Only this ref triggers auto-end on wake.
+    // Completely separate from lockBreakRef and the shutdown → clock-out flow.
+    const sleepBreakRef = useRef(false);
+
+    // `breakLimitReachedRef` = always reflects whether todayBreaksCount >= maxBreaks.
+    // Used inside the sleep IPC effect (which is registered before todayBreaksCount
+    // is declared) to safely read the current limit status without a stale closure.
+    const breakLimitReachedRef = useRef(false);
 
     // ── Tick: forces re-render every second when shift is active ──────────────
     const [tick, setTick] = useState(0);
@@ -402,6 +417,80 @@ export function useTimer() {
         return () => api.removeScreenListeners();
     }, [status, fetchStatus, fetchHistory]);
 
+    // ── Sleep / Resume Listeners (Electron IPC) ────────────────────────────────
+    // When the system goes to sleep (suspend):
+    //   • If working AND below break limit → auto-start a break + set sleepBreakRef
+    //   • If already on break, at break limit, or not clocked in → do nothing
+    // When the system wakes (resume):
+    //   • If sleepBreakRef is set → auto-end the break + clear flag
+    //
+    // ⚠️ This is INDEPENDENT from the shutdown → disconnect-intent → auto-checkout flow.
+    //    'suspend' and 'shutdown' are different OS events and must never be mixed.
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api) return;
+
+        api.onSleepStart(async () => {
+            console.log('[Sleep] System suspending');
+
+            // Guard 1: only start break if actively working
+            if (status !== 'working') {
+                console.log('[Sleep] Not working — skipping sleep break');
+                return;
+            }
+
+            // Guard 2: only start break if below the admin-configured break limit
+            // Uses breakLimitReachedRef (a ref) to avoid reading todayBreaksCount
+            // before it is declared in the hook body.
+            if (breakLimitReachedRef.current) {
+                console.log('[Sleep] Break limit reached — skipping sleep break');
+                return;
+            }
+
+            // Close any open idle session first (sleep ends idle tracking)
+            setIdleSessionStartTime(null);
+            await endIdleSession().catch(() => { /* No idle session open — safe to ignore */ });
+
+            // Mark this break as sleep-initiated so we know to auto-resume on wake
+            sleepBreakRef.current = true;
+
+            console.log('[Sleep] Auto-starting break due to system sleep');
+            try {
+                await toggleBreak();
+                await fetchStatus();
+                await fetchHistory();
+            } catch (e) {
+                console.warn('[Sleep] Failed to start break on sleep:', e);
+                sleepBreakRef.current = false; // reset flag if API call failed
+            }
+        });
+
+        api.onSleepEnd(async () => {
+            console.log('[Sleep] System resumed from sleep');
+
+            // Only auto-resume if THIS break was started by sleep
+            if (!sleepBreakRef.current) {
+                console.log('[Sleep] Break was not sleep-initiated — leaving break running');
+                return;
+            }
+
+            // Clear flag before API call to prevent double-triggering
+            sleepBreakRef.current = false;
+
+            console.log('[Sleep] Auto-ending break due to system wake');
+            try {
+                await toggleBreak();
+                await fetchStatus();
+                await fetchHistory();
+            } catch (e) {
+                console.warn('[Sleep] Failed to end break on wake:', e);
+            }
+        });
+
+        return () => api.removeSleepListeners();
+    }, [status, fetchStatus, fetchHistory]);
+
     // ── Computed Stats ────────────────────────────────────────────────────────
     // Recalculated on every render (every second when shift is active)
 
@@ -431,6 +520,10 @@ export function useTimer() {
     // Optimistic +1 for when user clicked "Take Break" but server hasn't yet responded
     const hasOptimisticBreak = !!(currentShift?.breaks.some(b => b.id.startsWith('temp-')));
     const todayBreaksCount = breaksCountFromHistory + (hasOptimisticBreak ? 1 : 0);
+
+    // Keep breakLimitReachedRef in sync on every render so the sleep effect
+    // can read the latest value without a stale closure.
+    breakLimitReachedRef.current = todayBreaksCount >= maxBreaks;
 
     // ── Active shift contribution (recalculated every second via tick) ──────────
     let activeWork = 0;
