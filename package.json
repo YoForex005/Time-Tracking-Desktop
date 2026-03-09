@@ -1,7 +1,7 @@
 {
   "name": "workfolio-desktop",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.3",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -54,6 +54,7 @@
     "directories": {
       "output": "release"
     },
+    "icon": "build/icon.png",
     "files": [
       "dist/**/*",
       "electron/**/*"

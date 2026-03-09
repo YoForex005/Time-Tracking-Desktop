@@ -308,6 +308,7 @@ function createWindow() {
         minHeight: 420,
         frame: false,
         titleBarStyle: 'hidden',
+        icon: path.join(__dirname, 'assets', 'icon.png'),
         webPreferences: {
             nodeIntegration: false,     // security: no direct Node access in renderer
             contextIsolation: true,     // security: renderer and preload have separate contexts
