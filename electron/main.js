@@ -152,7 +152,7 @@ async function sendBreakToggle(context) {
 // ── OTA Updates (Configuration) ──────────────────────────────────────────────
 
 autoUpdater.autoDownload = true; // Download silently in the background
-autoUpdater.allowPrerelease = false;
+autoUpdater.allowPrerelease = true;
 
 // Configure logging for updates
 autoUpdater.logger = console;
