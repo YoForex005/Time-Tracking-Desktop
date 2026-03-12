@@ -113,7 +113,7 @@ function CloseWarningModal({
                 </div>
 
                 <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
-                    Still clocked in!
+                    Closing App Before Clocking Out may cause your time to not be tracked !
                 </h2>
                 <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: '0 0 24px', fontWeight: 500 }}>
                     Are you sure you want to close the app? This will automatically click Clock Out and stop tracking your time.
