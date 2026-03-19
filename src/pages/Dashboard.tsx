@@ -74,7 +74,7 @@ function CheckoutWarningModal({
                         Keep Working
                     </button>
                     <button className="btn btn-danger" onClick={onProceed} style={{ flex: 1, padding: '12px' }}>
-                        Check Out Anyway
+                        Clock Out Anyway
                     </button>
                 </div>
             </div>
@@ -105,9 +105,9 @@ function CloseWarningModal({
                         // feather-alert-triangle SVG inline
                     }}>
                         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/>
-                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                            <line x1="12" y1="9" x2="12" y2="13" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
                         </svg>
                     </div>
                 </div>
@@ -250,7 +250,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                         {status === 'working' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
                                 <img src="./cctv.gif" alt="CCTV" style={{ width: 50, height: 50 }} />
-                                
+
                             </div>
                         ) : (
                             <StatusBadge status={status} />
