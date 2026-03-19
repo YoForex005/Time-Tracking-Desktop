@@ -243,6 +243,20 @@ export function useTimer() {
         setLoading(true);
         Promise.all([fetchStatus(), fetchHistory(), fetchIdleSecs()])
             .finally(() => setLoading(false));
+
+        // ── Push initial thresholds to Electron on mount ──────────────────────────
+        // Because the main process defaults to 60s/600s on launch, we must sync our
+        // local saved values immediately so that previous settings are respected
+        // without waiting for the admin to change them in the database.
+        const api = window.electronAPI;
+        if (api) {
+            if ('setIdleThreshold' in api) {
+                (api as unknown as { setIdleThreshold: (s: number) => void }).setIdleThreshold(lastThresholdRef.current);
+            }
+            if ('setScreenshotInterval' in api) {
+                (api as unknown as { setScreenshotInterval: (s: number) => void }).setScreenshotInterval(lastScreenshotIntervalRef.current);
+            }
+        }
     }, [fetchStatus, fetchHistory, fetchIdleSecs]);
 
     // ── Per-second Tick ───────────────────────────────────────────────────────

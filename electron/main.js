@@ -263,21 +263,12 @@ function startIdlePolling() {
         if (nowIdle && !isUserIdle) {
             isUserIdle = true;
 
-            // Calculate the real moment idleness BEGAN COUNTING — i.e. the point
-            // at which the 60-second grace period expired, NOT when the user
-            // stopped moving. We subtract only the excess beyond the threshold.
-            //
-            // Example: if idleSecs = 75
-            //   Grace period  = 60s  (not counted)
-            //   Countable idle = 75 - 60 = 15s
-            //   So startTime  = now - 15s
-            //
-            // This ensures the first minute of inactivity is NEVER included
-            // in the idle total.
-            const countableIdleSecs = idleSecs - IDLE_THRESHOLD_SECS;
-            const idleStartTime = new Date(Date.now() - countableIdleSecs * 1000).toISOString();
+            // Record the real moment the idle period began, which is exactly
+            // `idleSecs` ago. We do NOT subtract the threshold as a grace period.
+            // When the limit is reached, the entire inactive period becomes idle time.
+            const idleStartTime = new Date(Date.now() - idleSecs * 1000).toISOString();
 
-            console.log(`[Idle] User went idle. Countable idle: ${countableIdleSecs}s, started at: ${idleStartTime}`);
+            console.log(`[Idle] User went idle. Total idle: ${idleSecs}s (Threshold: ${IDLE_THRESHOLD_SECS}s) started at: ${idleStartTime}`);
             mainWindow.webContents.send('idle-start', idleStartTime);
         }
 
