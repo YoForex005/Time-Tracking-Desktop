@@ -261,8 +261,8 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                         </div>
 
                         <div className="timer-sub">
-                            {status === 'stopped' && 'Click "Check In" to start your shift'}
-                            {status === 'working' && 'Shift in progress — take a break or check out when done'}
+                            {status === 'stopped' && 'Click "clock In" to start your shift'}
+                            {status === 'working' && 'Shift in progress — take a break or clock out when done'}
                             {status === 'on_break' && "Break in progress — resume when you're ready"}
                         </div>
 
@@ -321,7 +321,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             className="btn btn-ghost"
                             onClick={onLogout}
                             disabled={status !== 'stopped'}
-                            title={status !== 'stopped' ? 'Please check out before logging out' : 'Logout'}
+                            title={status !== 'stopped' ? 'Please clock out before logging out' : 'Logout'}
                             style={{ flex: 1, padding: '10px', fontSize: 13, color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                         >
                             Logout
