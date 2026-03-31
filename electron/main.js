@@ -26,6 +26,13 @@ const tracker = require('./tracking/tracker');
 const screenshotScheduler = require('./tracking/screenshotScheduler');
 const { URL } = require('url');
 
+// Set the app name explicitly for the taskbar and OS integration
+app.setName('YO HRMX');
+// Required for Windows taskbar grouping and notifications to show the correct name
+if (process.platform === 'win32') {
+    app.setAppUserModelId('com.yohrmx.timetracker');
+}
+
 // ── Custom Protocol (Deep-Link Auth) ──────────────────────────────────────────
 // Register workfolio:// as the app's custom URL scheme so the OS can hand
 // browser-to-desktop callbacks back to us after the user authenticates.
@@ -145,7 +152,7 @@ async function sendBreakToggle(context) {
 // ── OTA Updates (Configuration) ──────────────────────────────────────────────
 
 autoUpdater.autoDownload = true; // Download silently in the background
-autoUpdater.allowPrerelease = false;
+autoUpdater.allowPrerelease = true;
 
 // Configure logging for updates
 autoUpdater.logger = console;

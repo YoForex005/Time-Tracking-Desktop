@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTimer, formatDuration } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
 
@@ -74,7 +74,57 @@ function CheckoutWarningModal({
                         Keep Working
                     </button>
                     <button className="btn btn-danger" onClick={onProceed} style={{ flex: 1, padding: '12px' }}>
-                        Check Out Anyway
+                        Clock Out Anyway
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── CloseWarningModal ───────────────────────────────────────────────────────
+
+function CloseWarningModal({
+    onProceed, onCancel
+}: {
+    onProceed: () => void;
+    onCancel: () => void;
+}) {
+    return (
+        <div className="modal-overlay" style={{ background: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(8px)' }}>
+            <div className="modal" style={{ background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 24px 64px -12px rgba(0,0,0,0.15)' }}>
+                {/* Warning icon */}
+                <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                    <div style={{
+                        width: 56, height: 56, borderRadius: '28px',
+                        background: 'linear-gradient(135deg, #fee2e2, #fecaca)',
+                        boxShadow: '0 8px 16px -4px rgba(239, 68, 68, 0.3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto',
+                        color: '#ef4444',
+                        // feather-alert-triangle SVG inline
+                    }}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                            <line x1="12" y1="9" x2="12" y2="13" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                    </div>
+                </div>
+
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
+                    Closing App Before Clocking Out may cause your time to not be tracked !
+                </h2>
+                <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: '0 0 24px', fontWeight: 500 }}>
+                    Are you sure you want to close the app? This will automatically click Clock Out and stop tracking your time.
+                </p>
+
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-ghost" onClick={onCancel} style={{ flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: 'none' }}>
+                        Keep Working
+                    </button>
+                    <button className="btn btn-danger" onClick={onProceed} style={{ flex: 1, padding: '12px' }}>
+                        Clock Out & Close
                     </button>
                 </div>
             </div>
@@ -102,6 +152,9 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
     const [remainingSecs, setRemainingSecs] = useState(0);
     const [proceedingStop, setProceedingStop] = useState(false);
 
+    // App close warning modal
+    const [showCloseWarning, setShowCloseWarning] = useState(false);
+
     /** Called when user clicks "Check Out" button */
     const handleCheckoutClick = () => {
         const activeSecs = Math.max(0, todayWorked - todayIdleSecs);
@@ -122,6 +175,28 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         setShowWarning(false);
         await handleStop();
         setProceedingStop(false);
+    };
+
+    // Close window logic
+    useEffect(() => {
+        const handleAppClose = (e: Event) => {
+            // Only stop if they are checked in
+            if (status !== 'stopped') {
+                e.preventDefault();
+                setShowCloseWarning(true);
+            }
+        };
+
+        window.addEventListener('request-app-close', handleAppClose);
+        return () => window.removeEventListener('request-app-close', handleAppClose);
+    }, [status]);
+
+    const confirmAppClose = async () => {
+        setProceedingStop(true);
+        setShowCloseWarning(false);
+        await handleStop();
+        // Finally close after checkout
+        (window as any).electronAPI?.close();
     };
 
     // Initialize background app tracking sync
@@ -146,6 +221,14 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                 />
             )}
 
+            {/* App close warning modal */}
+            {showCloseWarning && (
+                <CloseWarningModal
+                    onProceed={confirmAppClose}
+                    onCancel={() => setShowCloseWarning(false)}
+                />
+            )}
+
             {/* ── TRACKER VIEW ─────────────────────────────────────────────── */}
             {view === 'tracker' && (
                 <>
@@ -167,7 +250,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                         {status === 'working' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
                                 <img src="./cctv.gif" alt="CCTV" style={{ width: 50, height: 50 }} />
-                                
+
                             </div>
                         ) : (
                             <StatusBadge status={status} />
@@ -178,8 +261,8 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                         </div>
 
                         <div className="timer-sub">
-                            {status === 'stopped' && 'Click "Check In" to start your shift'}
-                            {status === 'working' && 'Shift in progress — take a break or check out when done'}
+                            {status === 'stopped' && 'Click "clock In" to start your shift'}
+                            {status === 'working' && 'Shift in progress — take a break or clock out when done'}
                             {status === 'on_break' && "Break in progress — resume when you're ready"}
                         </div>
 
@@ -238,7 +321,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             className="btn btn-ghost"
                             onClick={onLogout}
                             disabled={status !== 'stopped'}
-                            title={status !== 'stopped' ? 'Please check out before logging out' : 'Logout'}
+                            title={status !== 'stopped' ? 'Please clock out before logging out' : 'Logout'}
                             style={{ flex: 1, padding: '10px', fontSize: 13, color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                         >
                             Logout
