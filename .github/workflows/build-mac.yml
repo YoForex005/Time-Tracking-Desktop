@@ -21,10 +21,17 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Mac DMG
-        run: npm run electron:build:mac
+      - name: Build Mac DMG (Signed & Notarized)
+        run: npm run electron:build:mac:signed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The certificate file (base64 encoded) and password
+          CSC_LINK: ${{ secrets.MAC_CERTS }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+          # Apple Developer credentials for notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
