@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*' # Trigger on exact versions like v1.2.11
 
+permissions:
+  contents: write
+
 jobs:
   release:
     name: Build & Release (${{ matrix.os }})
@@ -35,6 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          EP_DRAFT: false
 
       - name: Publish Windows
         if: matrix.os == 'windows-latest'
@@ -42,3 +46,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          EP_DRAFT: false
