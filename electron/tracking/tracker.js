@@ -291,7 +291,30 @@ function normalizeUrl(rawUrl) {
     }
 }
 
-function getRunningApps() {
+async function getRunningApps() {
+    if (process.platform === 'darwin') {
+        try {
+            const activeWin = require('active-win');
+            const win = await activeWin({ screenRecordingPermission: false }); // false avoids annoying popups instantly if denied, though they must enable it manually
+            if (!win) return [];
+            
+            return [{
+                Process: win.owner.name ? win.owner.name.toLowerCase().replace(/\s/g, '') : 'unknown',
+                DisplayName: win.owner.name,
+                Title: win.title,
+                Url: win.url || null,
+                Path: win.owner.path,
+                PID: win.owner.processId || 0,
+                HWND: win.id || 0,
+                IsForeground: true
+            }];
+        } catch (err) {
+            console.log('[Tracker] Mac active-win error:', err.message);
+            return [];
+        }
+    }
+
+    // Windows fallback
     return new Promise(resolve => {
         execFile(
             'powershell.exe',

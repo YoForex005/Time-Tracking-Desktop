@@ -48,6 +48,36 @@ function executePowerShell(script) {
 }
 
 async function captureCurrentMonitorPng() {
+    if (process.platform === 'darwin') {
+        const { execFile } = require('child_process');
+        const path = require('path');
+        const os = require('os');
+        const fs = require('fs/promises');
+        
+        const timestamp = Date.now();
+        const tmpPath = path.join(os.tmpdir(), `wf_shot_${timestamp}.png`);
+        
+        return new Promise((resolve, reject) => {
+            execFile('screencapture', ['-x', '-C', tmpPath], async (err, stdout, stderr) => {
+                if (err) {
+                    return reject(new Error('macOS screenshot failed: ' + (stderr || err.message)));
+                }
+                try {
+                    // Try to wait a tiny bit to ensure the file is completely written to disk
+                    await new Promise(r => setTimeout(r, 100));
+                    const imageBuffer = await fs.readFile(tmpPath);
+                    await fs.unlink(tmpPath).catch(() => {});
+                    resolve({
+                        imageBuffer,
+                        display: { width: 0, height: 0, x: 0, y: 0 }
+                    });
+                } catch (e) {
+                    reject(new Error('Failed to read mac screenshot: ' + e.message));
+                }
+            });
+        });
+    }
+
     const raw = await executePowerShell(PS_CAPTURE_SCRIPT);
     if (!raw) {
         throw new Error('Screenshot capture returned empty output');
