@@ -336,8 +336,10 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                     <div className="timer-card">
                         {status === 'working' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
-                                <img src="./cctv.gif" alt="CCTV" style={{ width: 50, height: 50 }} />
-
+                                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 4px 6px rgba(16, 185, 129, 0.3))' }}>
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
                             </div>
                         ) : (
                             <StatusBadge status={status} />
@@ -348,9 +350,9 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                         </div>
 
                         <div className="timer-sub">
-                            {status === 'stopped' && 'Click "clock In" to start your shift'}
-                            {status === 'working' && 'Shift in progress — take a break or clock out when done'}
-                            {status === 'on_break' && "Break in progress — resume when you're ready"}
+                            {status === 'stopped' && 'Ready to work. Clock in when you start.'}
+                            {status === 'working' && 'Shift in progress. Stay productive!'}
+                            {status === 'on_break' && "Break in progress. Relax!"}
                         </div>
 
                         {error && <div className="form-error" style={{ width: '100%', textAlign: 'center' }}>{error}</div>}

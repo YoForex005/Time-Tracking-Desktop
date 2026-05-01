@@ -389,7 +389,7 @@ function createWindow() {
     });
 
     autoUpdater.on('error', (err) => {
-        sendOtaStatus(`Update error: ${err.message}`);
+        console.error(`[OTA] Update error (suppressed in UI): ${err.message}`);
     });
 
     autoUpdater.on('download-progress', (progressObj) => {

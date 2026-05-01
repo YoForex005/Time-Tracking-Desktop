@@ -1,7 +1,7 @@
 {
   "name": "workfolio-desktop",
   "private": true,
-  "version": "1.2.10",
+  "version": "1.2.14",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
@@ -10,6 +10,8 @@
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "build": "tsc -b && vite build",
     "electron:build": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "electron:build:mac": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --x64 --arm64",
+    "electron:build:mac:signed": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=true electron-builder --mac",
     "electron:publish": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win -p always",
     "preview": "vite preview"
   },
@@ -69,6 +71,12 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.business"
     },
     "nsis": {
       "oneClick": true,

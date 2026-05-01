@@ -48,6 +48,49 @@ function executePowerShell(script) {
 }
 
 async function captureCurrentMonitorPng() {
+    if (process.platform === 'darwin') {
+        const { execFile } = require('child_process');
+        const path = require('path');
+        const os = require('os');
+        const fs = require('fs/promises');
+        
+        const timestamp = Date.now();
+        const tmpPath = path.join(os.tmpdir(), `wf_shot_${timestamp}.png`);
+        
+        return new Promise((resolve, reject) => {
+            // -x = silent, -C = cursor, -m = main monitor ONLY (prevents filename ' 1' multi-monitor bug)
+            execFile('screencapture', ['-x', '-C', '-m', tmpPath], async (err, stdout, stderr) => {
+                if (err) {
+                    return reject(new Error('macOS screenshot failed: ' + (stderr || err.message)));
+                }
+                try {
+                    // Give it a solid 500ms for macOS to finish physically writing to the SSD
+                    await new Promise(r => setTimeout(r, 500));
+                    let imageBuffer;
+                    try {
+                        imageBuffer = await fs.readFile(tmpPath);
+                    } catch (readErr) {
+                        // Multi-monitor fallback just in case -m failed to stop numbering on older macOS
+                        try {
+                            const fallbackPath = path.join(os.tmpdir(), `wf_shot_${timestamp} 1.png`);
+                            imageBuffer = await fs.readFile(fallbackPath);
+                            await fs.unlink(fallbackPath).catch(() => {});
+                        } catch (fallbackErr) {
+                            throw readErr; // throw original
+                        }
+                    }
+                    await fs.unlink(tmpPath).catch(() => {});
+                    resolve({
+                        imageBuffer,
+                        display: { width: 0, height: 0, x: 0, y: 0 }
+                    });
+                } catch (e) {
+                    reject(new Error('Failed to read mac screenshot: ' + e.message));
+                }
+            });
+        });
+    }
+
     const raw = await executePowerShell(PS_CAPTURE_SCRIPT);
     if (!raw) {
         throw new Error('Screenshot capture returned empty output');

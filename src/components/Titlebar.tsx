@@ -5,6 +5,12 @@ interface TitlebarProps {
 export default function Titlebar({ userName }: TitlebarProps) {
     const eAPI = () => (window as unknown as { electronAPI?: Record<string, () => void> }).electronAPI;
     
+    // Dynamic greeting calculation
+    const hour = new Date().getHours();
+    let greeting = 'Good morning';
+    if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
+    else if (hour >= 17) greeting = 'Good evening';
+
     const handleClose = () => {
         // Dispatch a custom event to allow React components to intercept the close
         const event = new CustomEvent('request-app-close', { cancelable: true });
@@ -21,7 +27,7 @@ export default function Titlebar({ userName }: TitlebarProps) {
     return (
         <div className="titlebar">
             <div className="titlebar__logo">
-                <span className="titlebar__user-label">Hi, {userName}</span>
+                <span className="titlebar__user-label">{greeting}, {userName}</span>
             </div>
 
             <div className="titlebar__right">
