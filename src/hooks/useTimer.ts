@@ -542,11 +542,11 @@ export function useTimer() {
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
-    const handleStart = async () => {
+    const handleStart = async (workLocation: 'wfh' | 'office') => {
         setError('');
         setActionLoading(true);
         try {
-            await startShift();
+            await startShift(workLocation);
             await fetchStatus();
             await fetchHistory();
         } catch (e: unknown) {

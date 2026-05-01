@@ -74,8 +74,12 @@ export async function getStatus() {
     };
 }
 
-export async function startShift() {
-    const res = await fetch(`${API_BASE}/time/start`, { method: 'POST', headers: authHeaders() });
+export async function startShift(workLocation: 'wfh' | 'office') {
+    const res = await fetch(`${API_BASE}/time/start`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ work_location: workLocation }),
+    });
     return handleResponse(res);
 }
 

@@ -19,6 +19,76 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
+// ── ClockInLocationModal ──────────────────────────────────────────────────
+
+function ClockInLocationModal({
+    onSelect, onCancel
+}: {
+    onSelect: (location: 'wfh' | 'office') => void;
+    onCancel: () => void;
+}) {
+    return (
+        <div className="modal-overlay" style={{ background: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(8px)' }}>
+            <div className="modal" style={{ background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 24px 64px -12px rgba(0,0,0,0.15)' }}>
+                <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                    <div style={{
+                        width: 56, height: 56, borderRadius: '28px',
+                        background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+                        boxShadow: '0 8px 16px -4px rgba(59, 130, 246, 0.3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        margin: '0 auto',
+                        fontSize: 26,
+                    }}>
+                        📍
+                    </div>
+                </div>
+
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
+                    Where are you working today?
+                </h2>
+                <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: '0 0 24px', fontWeight: 500 }}>
+                    Select your work location before clocking in
+                </p>
+
+                <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                    <button
+                        onClick={() => onSelect('wfh')}
+                        style={{
+                            flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid #dbeafe',
+                            background: '#eff6ff', cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', gap: 8, fontWeight: 700, color: '#1d4ed8', fontSize: 13,
+                            transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#dbeafe'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#93c5fd'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#eff6ff'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#dbeafe'; }}
+                    >
+                        <span style={{ fontSize: 28 }}>🏠</span>
+                        Work From Home
+                    </button>
+                    <button
+                        onClick={() => onSelect('office')}
+                        style={{
+                            flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid #dcfce7',
+                            background: '#f0fdf4', cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', gap: 8, fontWeight: 700, color: '#15803d', fontSize: 13,
+                            transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#dcfce7'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#86efac'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f0fdf4'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#dcfce7'; }}
+                    >
+                        <span style={{ fontSize: 28 }}>🏢</span>
+                        In Office
+                    </button>
+                </div>
+
+                <button className="btn btn-ghost" onClick={onCancel} style={{ width: '100%', padding: '10px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 8 }}>
+                    Cancel
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // ── CheckoutWarningModal ──────────────────────────────────────────────────
 
 function CheckoutWarningModal({
@@ -147,6 +217,15 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks,
     } = useTimer();
 
+    // Clock-in location modal
+    const [showLocationModal, setShowLocationModal] = useState(false);
+
+    const handleClockInClick = () => setShowLocationModal(true);
+    const handleLocationSelect = (location: 'wfh' | 'office') => {
+        setShowLocationModal(false);
+        handleStart(location);
+    };
+
     // Checkout warning modal
     const [showWarning, setShowWarning] = useState(false);
     const [remainingSecs, setRemainingSecs] = useState(0);
@@ -212,6 +291,14 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
 
     return (
         <div className="main">
+            {/* Clock-in location modal */}
+            {showLocationModal && (
+                <ClockInLocationModal
+                    onSelect={handleLocationSelect}
+                    onCancel={() => setShowLocationModal(false)}
+                />
+            )}
+
             {/* Checkout warning modal */}
             {showWarning && (
                 <CheckoutWarningModal
@@ -272,7 +359,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             <button
                                 id="btn-check-in"
                                 className="btn btn-success"
-                                onClick={handleStart}
+                                onClick={handleClockInClick}
                                 disabled={status !== 'stopped' || actionLoading}
                                 style={{ whiteSpace: 'nowrap' }}
                             >
