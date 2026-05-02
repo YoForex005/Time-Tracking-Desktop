@@ -71,6 +71,9 @@ export async function getStatus() {
         expectedActiveSecs: number;
         maxBreaks: number;
         screenshotIntervalSecs: number;
+        wfhCaptureIntervalMs?: number;
+        wfhThumbWidth?: number;
+        wfhThumbHeight?: number;
     };
 }
 
