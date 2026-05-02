@@ -215,6 +215,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         handleStart, handleBreak, handleStop,
         todayWorked, todayBreakSecs: _todayBreakSecs, todayBreaksCount, todayIdleSecs,
         expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks,
+        workLocation,
     } = useTimer();
 
     // Clock-in location modal
@@ -354,6 +355,14 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             {status === 'working' && 'Shift in progress. Stay productive!'}
                             {status === 'on_break' && "Break in progress. Relax!"}
                         </div>
+
+                        {status !== 'stopped' && workLocation === 'wfh' && (
+                            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
+                                <span style={{ fontSize: 11, fontWeight: 700, background: '#dbeafe', color: '#1d4ed8', padding: '3px 10px', borderRadius: 999 }}>
+                                    🏠 Work From Home
+                                </span>
+                            </div>
+                        )}
 
                         {error && <div className="form-error" style={{ width: '100%', textAlign: 'center' }}>{error}</div>}
 

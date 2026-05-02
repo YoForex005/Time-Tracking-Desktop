@@ -35,6 +35,7 @@ export interface HistoryShift {
     checkoutReason?: string | null;
     graceAppliedSecs?: number;
     timeAdjustmentSecs?: number;
+    workLocation?: string;
     breaks: Array<{ id: string; startTime: string; endTime: string | null }>;
 }
 
@@ -680,5 +681,6 @@ export function useTimer() {
         expectedWorkSecs,     // org-wide expected total shift length
         expectedActiveSecs,   // org-wide expected active (non-idle) time
         maxBreaks,            // org-wide max breaks per shift (admin-configurable)
+        workLocation: currentShift?.workLocation ?? 'office',
     };
 }
