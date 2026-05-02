@@ -33,6 +33,7 @@ let THUMB_H = 90;
 
 let _timer            = null;
 let _screenIdle       = false;
+let _screenIdleAt     = null;    // timestamp (Date) when screen first went idle
 let _lastHash         = null;
 let _staticCount      = 0;       // consecutive unchanged frames
 let _framesForIdle    = 4;       // how many static frames = idle (recalculated on start)
@@ -71,7 +72,8 @@ async function captureAndCheck() {
             // Screen unchanged
             _staticCount++;
             if (!_screenIdle && _staticCount >= _framesForIdle) {
-                _screenIdle = true;
+                _screenIdle  = true;
+                _screenIdleAt = new Date();
                 console.log(`[WFH Monitor] Screen idle (${_staticCount} static frames)`);
                 if (_onScreenIdle) _onScreenIdle();
             }
@@ -81,7 +83,8 @@ async function captureAndCheck() {
             _staticCount = 0;
 
             if (_screenIdle) {
-                _screenIdle = false;
+                _screenIdle   = false;
+                _screenIdleAt = null;
                 console.log('[WFH Monitor] Screen active again');
                 if (_onScreenActive) _onScreenActive();
             }
@@ -98,12 +101,12 @@ async function captureAndCheck() {
  * Start the screen monitor.
  * Safe to call multiple times — stops any previous run first.
  *
- * @param {number}   idleThresholdSecs  Same threshold used by input idle detector
- * @param {object}   config             wfhConfig { intervalMs, width, height }
- * @param {Function} onScreenIdle       Called once when screen becomes idle
- * @param {Function} onScreenActive     Called once when screen becomes active again
+ * @param {number}   screenIdleThresholdSecs  How long screen must be static before it's idle (independent of input idle threshold)
+ * @param {object}   config                   wfhConfig { intervalMs, width, height }
+ * @param {Function} onScreenIdle             Called once when screen becomes idle
+ * @param {Function} onScreenActive           Called once when screen becomes active again
  */
-function start(idleThresholdSecs, config, onScreenIdle, onScreenActive) {
+function start(screenIdleThresholdSecs, config, onScreenIdle, onScreenActive) {
     stop();
 
     if (config) {
@@ -112,15 +115,16 @@ function start(idleThresholdSecs, config, onScreenIdle, onScreenActive) {
         THUMB_H = config.height || 90;
     }
 
-    _framesForIdle  = Math.max(1, Math.ceil((idleThresholdSecs * 1000) / CAPTURE_INTERVAL_MS));
+    _framesForIdle  = Math.max(1, Math.ceil((screenIdleThresholdSecs * 1000) / CAPTURE_INTERVAL_MS));
     _onScreenIdle   = onScreenIdle;
     _onScreenActive = onScreenActive;
     _screenIdle     = false;
+    _screenIdleAt   = null;
     _lastHash       = null;
     _staticCount    = 0;
 
     _timer = setInterval(captureAndCheck, CAPTURE_INTERVAL_MS);
-    console.log(`[WFH Monitor] Started — threshold ${idleThresholdSecs}s = ${_framesForIdle} static frames`);
+    console.log(`[WFH Monitor] Started — threshold ${screenIdleThresholdSecs}s = ${_framesForIdle} static frames @ ${CAPTURE_INTERVAL_MS}ms interval`);
 }
 
 /** Stop the monitor and reset all state. */
@@ -129,9 +133,10 @@ function stop() {
         clearInterval(_timer);
         _timer = null;
     }
-    _screenIdle  = false;
-    _lastHash    = null;
-    _staticCount = 0;
+    _screenIdle   = false;
+    _screenIdleAt = null;
+    _lastHash     = null;
+    _staticCount  = 0;
     // Only log if it was actually running
     if (_onScreenIdle) {
         console.log('[WFH Monitor] Stopped');
@@ -145,4 +150,9 @@ function isScreenIdle() {
     return _screenIdle;
 }
 
-module.exports = { start, stop, isScreenIdle };
+/** Returns the Date when screen went idle, or null if screen is active. */
+function getScreenIdleAt() {
+    return _screenIdleAt;
+}
+
+module.exports = { start, stop, isScreenIdle, getScreenIdleAt };

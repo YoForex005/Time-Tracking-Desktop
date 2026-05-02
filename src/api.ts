@@ -72,6 +72,7 @@ export async function getStatus() {
         maxBreaks: number;
         screenshotIntervalSecs: number;
         wfhCaptureIntervalMs?: number;
+        wfhScreenIdleThresholdSecs?: number;
         wfhThumbWidth?: number;
         wfhThumbHeight?: number;
     };

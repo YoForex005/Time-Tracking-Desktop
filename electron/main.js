@@ -62,7 +62,8 @@ const API_BASE = process.env.API_BASE || 'https://hrmsbackend.yoforex.net/api';
  * admin-configured per-user value after login via the 'set-idle-threshold' IPC.
  * Default: 60s (matches the previous hardcoded value).
  */
-let IDLE_THRESHOLD_SECS = 60; // NOTE: updated dynamically via IPC after login
+let IDLE_THRESHOLD_SECS = 60;            // hardware (input) idle — updated via IPC after login
+let WFH_SCREEN_IDLE_THRESHOLD_SECS = 240; // screen static idle — independent setting, updated via IPC
 
 let wfhConfig = {
     intervalMs: 15000,
@@ -272,22 +273,25 @@ function startIdlePolling() {
         if (isScreenLocked) return;
 
         const idleSecs = powerMonitor.getSystemIdleTime();
-        // WFH: require BOTH input idle AND screen idle before firing idle-start.
-        // Office (default): input idle alone is sufficient — existing behaviour.
-        const nowIdle = isWfhMode
-            ? (idleSecs >= IDLE_THRESHOLD_SECS || wfhScreenMonitor.isScreenIdle())
-            : (idleSecs >= IDLE_THRESHOLD_SECS);
+        const inputIdle = idleSecs >= IDLE_THRESHOLD_SECS;
+        const screenIdle = isWfhMode && wfhScreenMonitor.isScreenIdle();
+        // WFH OR-mode: either input idle OR screen idle triggers.
+        // Office (default): input idle alone — existing behaviour.
+        const nowIdle = isWfhMode ? (inputIdle || screenIdle) : inputIdle;
 
         // ── Transition: Active → Idle ──────────────────────────────────────
         if (nowIdle && !isUserIdle) {
             isUserIdle = true;
 
-            // Record the real moment the idle period began, which is exactly
-            // `idleSecs` ago. We do NOT subtract the threshold as a grace period.
-            // When the limit is reached, the entire inactive period becomes idle time.
-            const idleStartTime = new Date(Date.now() - idleSecs * 1000).toISOString();
+            // Pick the earliest known idle start:
+            //   - Input trigger: now - idleSecs (standard path)
+            //   - Screen trigger: when the screen actually went static
+            // Whichever happened first is the true idle start.
+            const inputIdleStart = new Date(Date.now() - idleSecs * 1000);
+            const screenIdleAt   = isWfhMode ? (wfhScreenMonitor.getScreenIdleAt() ?? inputIdleStart) : inputIdleStart;
+            const idleStartTime  = (screenIdleAt < inputIdleStart ? screenIdleAt : inputIdleStart).toISOString();
 
-            console.log(`[Idle] User went idle. Total idle: ${idleSecs}s (Threshold: ${IDLE_THRESHOLD_SECS}s) started at: ${idleStartTime}`);
+            console.log(`[Idle] User went idle. Input idle: ${idleSecs}s, screen idle: ${screenIdle} (Threshold: ${IDLE_THRESHOLD_SECS}s) started at: ${idleStartTime}`);
             mainWindow.webContents.send('idle-start', idleStartTime);
         }
 
@@ -476,17 +480,25 @@ app.whenReady().then(() => {
     ipcMain.on('set-idle-threshold', (_event, seconds) => {
         if (typeof seconds === 'number' && seconds >= 10) {
             IDLE_THRESHOLD_SECS = Math.round(seconds);
-            console.log(`[Idle] Threshold updated by admin to ${IDLE_THRESHOLD_SECS}s`);
-            // If WFH monitor is running, restart it so it uses the new threshold.
-            if (isWfhMode) wfhScreenMonitor.start(IDLE_THRESHOLD_SECS, wfhConfig,
-                () => { console.log('[WFH] Screen idle — waiting for input idle confirmation'); },
-                () => {
-                    if (isUserIdle && mainWindow && !mainWindow.isDestroyed()) {
-                        isUserIdle = false;
-                        mainWindow.webContents.send('idle-end');
-                    }
-                }
-            );
+            console.log(`[Idle] Hardware threshold updated to ${IDLE_THRESHOLD_SECS}s`);
+            // Hardware threshold change does NOT restart WFH monitor —
+            // screen idle threshold is a separate independent value.
+        }
+    });
+
+    ipcMain.on('set-wfh-screen-idle-threshold', (_event, seconds) => {
+        if (typeof seconds === 'number' && seconds >= 10) {
+            WFH_SCREEN_IDLE_THRESHOLD_SECS = Math.round(seconds);
+            console.log(`[WFH] Screen idle threshold updated to ${WFH_SCREEN_IDLE_THRESHOLD_SECS}s`);
+            // Restart monitor so _framesForIdle is recalculated with new threshold.
+            if (isWfhMode) {
+                wfhScreenMonitor.start(
+                    WFH_SCREEN_IDLE_THRESHOLD_SECS,
+                    wfhConfig,
+                    () => { console.log('[WFH] Screen went idle'); },
+                    () => { console.log('[WFH] Screen became active — poller will re-evaluate'); }
+                );
+            }
         }
     });
 
@@ -501,18 +513,13 @@ app.whenReady().then(() => {
             wfhConfig.intervalMs = config.intervalMs ?? wfhConfig.intervalMs;
             wfhConfig.width = config.width ?? wfhConfig.width;
             wfhConfig.height = config.height ?? wfhConfig.height;
-            console.log(`[WFH] Config updated from backend: intervalMs=${wfhConfig.intervalMs}, width=${wfhConfig.width}, height=${wfhConfig.height}`);
+            console.log(`[WFH] Capture config updated: intervalMs=${wfhConfig.intervalMs}, width=${wfhConfig.width}, height=${wfhConfig.height}`);
             if (isWfhMode) {
                 wfhScreenMonitor.start(
-                    IDLE_THRESHOLD_SECS,
+                    WFH_SCREEN_IDLE_THRESHOLD_SECS,
                     wfhConfig,
-                    () => { console.log('[WFH] Screen idle — waiting for input idle confirmation'); },
-                    () => {
-                        if (isUserIdle && mainWindow && !mainWindow.isDestroyed()) {
-                            isUserIdle = false;
-                            mainWindow.webContents.send('idle-end');
-                        }
-                    }
+                    () => { console.log('[WFH] Screen went idle'); },
+                    () => { console.log('[WFH] Screen became active — poller will re-evaluate'); }
                 );
             }
         }
@@ -531,20 +538,10 @@ app.whenReady().then(() => {
 
         if (isWfhMode) {
             wfhScreenMonitor.start(
-                IDLE_THRESHOLD_SECS,
+                WFH_SCREEN_IDLE_THRESHOLD_SECS,
                 wfhConfig,
-                // Screen went idle — the idle poller will fire idle-start on next
-                // tick if input is also idle (AND gate in startIdlePolling).
-                () => { console.log('[WFH] Screen idle — waiting for input idle confirmation'); },
-                // Screen became active — end any running idle session immediately,
-                // regardless of whether input is still idle.
-                () => {
-                    if (isUserIdle && mainWindow && !mainWindow.isDestroyed()) {
-                        isUserIdle = false;
-                        console.log('[WFH] Screen active — ending idle session');
-                        mainWindow.webContents.send('idle-end');
-                    }
-                }
+                () => { console.log('[WFH] Screen went idle'); },
+                () => { console.log('[WFH] Screen became active — poller will re-evaluate'); }
             );
         } else {
             wfhScreenMonitor.stop();

@@ -71,6 +71,8 @@ declare global {
             setScreenshotInterval: (seconds: number) => void;
             // WFH config
             setWfhConfig: (config: { intervalMs: number; width: number; height: number }) => void;
+            // WFH screen idle threshold (independent of hardware idle threshold)
+            setWfhScreenIdleThreshold: (seconds: number) => void;
             // WFH mode
             setWorkLocation: (location: string) => void;
         };
@@ -195,7 +197,7 @@ export function useTimer() {
                 }
             }
 
-            // Sync WFH Config
+            // Sync WFH capture config (interval + thumbnail size)
             if (
                 typeof data.wfhCaptureIntervalMs === 'number' &&
                 typeof data.wfhThumbWidth === 'number' &&
@@ -208,6 +210,15 @@ export function useTimer() {
                         width: data.wfhThumbWidth,
                         height: data.wfhThumbHeight
                     });
+                }
+            }
+
+            // Sync WFH screen idle threshold (separate from hardware idle threshold)
+            if (typeof data.wfhScreenIdleThresholdSecs === 'number') {
+                const api = window.electronAPI;
+                if (api && 'setWfhScreenIdleThreshold' in api) {
+                    (api as unknown as { setWfhScreenIdleThreshold: (s: number) => void })
+                        .setWfhScreenIdleThreshold(data.wfhScreenIdleThresholdSecs);
                 }
             }
 

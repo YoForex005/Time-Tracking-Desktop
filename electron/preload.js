@@ -126,6 +126,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setScreenshotInterval: (seconds) => ipcRenderer.send('set-screenshot-interval', seconds),
     setWorkLocation: (location) => ipcRenderer.send('set-work-location', location),
     setWfhConfig: (config) => ipcRenderer.send('set-wfh-config', config),
+    setWfhScreenIdleThreshold: (seconds) => ipcRenderer.send('set-wfh-screen-idle-threshold', seconds),
 
     // ── Browser-Based Device-Flow Auth ────────────────────────────────────────
     /**
