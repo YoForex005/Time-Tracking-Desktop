@@ -24,6 +24,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const tracker = require('./tracking/tracker');
 const screenshotScheduler = require('./tracking/screenshotScheduler');
+const wfhScreenMonitor = require('./tracking/wfhScreenMonitor');
 const { URL } = require('url');
 
 // Set the app name explicitly for the taskbar and OS integration
@@ -63,6 +64,12 @@ const API_BASE = process.env.API_BASE || 'https://hrmsbackend.yoforex.net/api';
  */
 let IDLE_THRESHOLD_SECS = 60; // NOTE: updated dynamically via IPC after login
 
+let wfhConfig = {
+    intervalMs: 15000,
+    width: 160,
+    height: 90
+};
+
 /**
  * How often (ms) we poll the system idle time.
  *
@@ -86,6 +93,7 @@ let disconnectIntentSent = false;
 // Updated by the renderer via 'update-shift-status' IPC whenever status changes.
 let currentShiftStatus = 'stopped'; // 'stopped' | 'working' | 'on_break'
 let sleepBreakStarted = false;      // true if THIS sleep triggered a break
+let isWfhMode = false;              // true when active shift has workLocation === 'wfh'
 
 function normalizeAuthToken(token) {
     if (typeof token !== 'string') return null;
@@ -264,7 +272,11 @@ function startIdlePolling() {
         if (isScreenLocked) return;
 
         const idleSecs = powerMonitor.getSystemIdleTime();
-        const nowIdle = idleSecs >= IDLE_THRESHOLD_SECS;
+        // WFH: require BOTH input idle AND screen idle before firing idle-start.
+        // Office (default): input idle alone is sufficient — existing behaviour.
+        const nowIdle = isWfhMode
+            ? (idleSecs >= IDLE_THRESHOLD_SECS && wfhScreenMonitor.isScreenIdle())
+            : (idleSecs >= IDLE_THRESHOLD_SECS);
 
         // ── Transition: Active → Idle ──────────────────────────────────────
         if (nowIdle && !isUserIdle) {
@@ -465,12 +477,83 @@ app.whenReady().then(() => {
         if (typeof seconds === 'number' && seconds >= 10) {
             IDLE_THRESHOLD_SECS = Math.round(seconds);
             console.log(`[Idle] Threshold updated by admin to ${IDLE_THRESHOLD_SECS}s`);
+            // If WFH monitor is running, restart it so it uses the new threshold.
+            if (isWfhMode) wfhScreenMonitor.start(IDLE_THRESHOLD_SECS, wfhConfig,
+                () => { console.log('[WFH] Screen idle — waiting for input idle confirmation'); },
+                () => {
+                    if (isUserIdle && mainWindow && !mainWindow.isDestroyed()) {
+                        isUserIdle = false;
+                        mainWindow.webContents.send('idle-end');
+                    }
+                }
+            );
         }
     });
 
     ipcMain.on('set-screenshot-interval', (_event, seconds) => {
         if (typeof seconds === 'number' && seconds >= 60 && seconds <= 3600) {
             screenshotScheduler.setIntervalSecs(Math.round(seconds));
+        }
+    });
+
+    ipcMain.on('set-wfh-config', (_event, config) => {
+        if (config && typeof config === 'object') {
+            wfhConfig.intervalMs = config.intervalMs ?? wfhConfig.intervalMs;
+            wfhConfig.width = config.width ?? wfhConfig.width;
+            wfhConfig.height = config.height ?? wfhConfig.height;
+            console.log(`[WFH] Config updated from backend: intervalMs=${wfhConfig.intervalMs}, width=${wfhConfig.width}, height=${wfhConfig.height}`);
+            if (isWfhMode) {
+                wfhScreenMonitor.start(
+                    IDLE_THRESHOLD_SECS,
+                    wfhConfig,
+                    () => { console.log('[WFH] Screen idle — waiting for input idle confirmation'); },
+                    () => {
+                        if (isUserIdle && mainWindow && !mainWindow.isDestroyed()) {
+                            isUserIdle = false;
+                            mainWindow.webContents.send('idle-end');
+                        }
+                    }
+                );
+            }
+        }
+    });
+
+    // ── IPC: WFH Mode ─────────────────────────────────────────────────────────
+    // Renderer sends this after every status poll with the active shift's
+    // workLocation. 'wfh' activates the screen-change idle monitor; 'office'
+    // (or no active shift) leaves the existing input-only monitor in charge.
+    ipcMain.on('set-work-location', (_event, location) => {
+        const wfh = location === 'wfh';
+        if (wfh === isWfhMode) return; // no change — nothing to do
+
+        isWfhMode = wfh;
+        console.log(`[WFH] Mode set to '${location}'`);
+
+        if (isWfhMode) {
+            wfhScreenMonitor.start(
+                IDLE_THRESHOLD_SECS,
+                wfhConfig,
+                // Screen went idle — the idle poller will fire idle-start on next
+                // tick if input is also idle (AND gate in startIdlePolling).
+                () => { console.log('[WFH] Screen idle — waiting for input idle confirmation'); },
+                // Screen became active — end any running idle session immediately,
+                // regardless of whether input is still idle.
+                () => {
+                    if (isUserIdle && mainWindow && !mainWindow.isDestroyed()) {
+                        isUserIdle = false;
+                        console.log('[WFH] Screen active — ending idle session');
+                        mainWindow.webContents.send('idle-end');
+                    }
+                }
+            );
+        } else {
+            wfhScreenMonitor.stop();
+            // If we were in a WFH-combined idle and switch back to office mode,
+            // reset idle state cleanly so the poller re-evaluates from scratch.
+            if (isUserIdle && mainWindow && !mainWindow.isDestroyed()) {
+                isUserIdle = false;
+                mainWindow.webContents.send('idle-end');
+            }
         }
     });
 

@@ -68,6 +68,10 @@ declare global {
             setIdleThreshold: (seconds: number) => void;
             // Screenshot interval
             setScreenshotInterval: (seconds: number) => void;
+            // WFH config
+            setWfhConfig: (config: { intervalMs: number; width: number; height: number }) => void;
+            // WFH mode
+            setWorkLocation: (location: string) => void;
         };
     }
 }
@@ -189,6 +193,29 @@ export function useTimer() {
                         .setScreenshotInterval(data.screenshotIntervalSecs);
                 }
             }
+
+            // Sync WFH Config
+            if (
+                typeof data.wfhCaptureIntervalMs === 'number' &&
+                typeof data.wfhThumbWidth === 'number' &&
+                typeof data.wfhThumbHeight === 'number'
+            ) {
+                const api = window.electronAPI;
+                if (api && 'setWfhConfig' in api) {
+                    api.setWfhConfig({
+                        intervalMs: data.wfhCaptureIntervalMs,
+                        width: data.wfhThumbWidth,
+                        height: data.wfhThumbHeight
+                    });
+                }
+            }
+
+            // ── WFH mode sync ─────────────────────────────────────────────────
+            // Push the active shift's workLocation to the Electron main process
+            // so it can activate/deactivate the screen-change idle monitor.
+            const shiftData = data.shift as { workLocation?: string } | null;
+            const workLoc = shiftData?.workLocation ?? 'office';
+            window.electronAPI?.setWorkLocation?.(workLoc);
 
 
         } catch {
