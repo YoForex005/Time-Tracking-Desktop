@@ -2,56 +2,80 @@
  * wfhScreenMonitor.js — WFH Screen Activity Monitor
  * ─────────────────────────────────────────────────────
  * ONLY active when the user clocks in as "Work From Home".
- * In-Office shifts use the existing input-only idle detector — this file
- * is completely dormant for them.
+ * In-Office shifts use the existing input-only idle detector.
  *
  * How it works:
- *   Every CAPTURE_INTERVAL_MS milliseconds, grab a tiny 160×90 thumbnail of
- *   the primary display using Electron's desktopCapturer API and compute a
- *   lightweight pixel checksum. If the checksum hasn't changed for
- *   `idleThresholdSecs` worth of captures → screen is idle.
- *   Once the screen changes again → screen is active.
+ *   Every CAPTURE_INTERVAL_MS, grab a 160×90 thumbnail of the primary display
+ *   and compare it to the previous frame using pixel-difference fraction.
+ *   A frame is "unchanged" only if < CHANGE_FRACTION_THRESHOLD of pixels differ.
+ *   This filters out blinking cursors, system-tray clock ticks, and minor OS
+ *   animations — all of which change < 0.1% of pixels in a 160×90 thumbnail.
+ *   Only genuine screen changes (navigation, new windows, content updates)
+ *   exceed the 2% threshold and reset the idle counter.
  *
- *   The main idle poller in main.js consults isScreenIdle() and uses AND logic:
- *     WFH idle  = input idle  AND  screen idle
- *     WFH active = input active OR  screen active
+ *   After _framesForIdle consecutive "unchanged" frames → screen idle.
+ *   One "changed" frame → screen active again.
+ *
+ *   The main idle poller in main.js uses OR logic for WFH:
+ *     WFH idle  = input idle  OR  screen idle
  *
  * Public API:
- *   start(idleThresholdSecs, onScreenIdle, onScreenActive)
+ *   start(screenIdleThresholdSecs, config, onScreenIdle, onScreenActive)
  *   stop()
- *   isScreenIdle()  → boolean
+ *   isScreenIdle()      → boolean
+ *   getScreenIdleAt()   → Date | null
  */
 
 const { desktopCapturer } = require('electron');
 
-// Default values (overridden by start config)
+// ── Configurable constants ────────────────────────────────────────────────────
+
+// Fraction of sampled pixels that must differ to count as "screen changed".
+// Below this → ignored (cursor blink ~0.01%, clock tick ~0.06%, minor chrome ~0.1%).
+// Above this → real change (navigation, new window, content update typically > 2%).
+const CHANGE_FRACTION_THRESHOLD = 0.02; // 2 %
+
+// Default capture settings (overridden by start() config)
 let CAPTURE_INTERVAL_MS = 15000;
 let THUMB_W = 160;
 let THUMB_H = 90;
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
-let _timer            = null;
-let _screenIdle       = false;
-let _screenIdleAt     = null;    // timestamp (Date) when screen first went idle
-let _lastHash         = null;
-let _staticCount      = 0;       // consecutive unchanged frames
-let _framesForIdle    = 4;       // how many static frames = idle (recalculated on start)
-let _onScreenIdle     = null;    // fired once when screen goes idle
-let _onScreenActive   = null;    // fired once when screen becomes active
+let _timer          = null;
+let _screenIdle     = false;
+let _screenIdleAt   = null;   // Date when screen first went idle
+let _lastBitmap     = null;   // previous frame bitmap buffer for diff comparison
+let _staticCount    = 0;      // consecutive "unchanged" frames
+let _framesForIdle  = 4;      // frames needed to declare screen idle
+let _onScreenIdle   = null;
+let _onScreenActive = null;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Pixel comparison ──────────────────────────────────────────────────────────
 
 /**
- * Fast pixel checksum: sum every 4th byte of the bitmap buffer.
- * Sampling reduces work ~4× while preserving enough sensitivity.
+ * Returns the fraction (0–1) of pixels that differ between two RGBA bitmaps
+ * by more than `tolerance` in any RGB channel.
+ * Samples every 4th pixel (16-byte stride) for ~4× speed with negligible
+ * accuracy loss on a 160×90 thumbnail (3 600 sampled pixels).
+ *
+ * @param {Buffer} bufA
+ * @param {Buffer} bufB
+ * @param {number} tolerance  Per-channel byte difference to ignore (default 8/255)
+ * @returns {number}  0 = identical, 1 = completely different
  */
-function pixelHash(buffer) {
-    let sum = 0;
-    for (let i = 0; i < buffer.length; i += 4) {
-        sum = (sum + buffer[i] + buffer[i + 1] + buffer[i + 2]) & 0x7fffffff;
+function pixelDiffFraction(bufA, bufB, tolerance = 8) {
+    if (!bufA || !bufB || bufA.length !== bufB.length) return 1;
+    let changed = 0;
+    let sampled = 0;
+    for (let i = 0; i < bufA.length; i += 16) { // stride 16 = every 4th RGBA pixel
+        const dr = Math.abs(bufA[i]   - bufB[i]);
+        const dg = Math.abs(bufA[i+1] - bufB[i+1]);
+        const db = Math.abs(bufA[i+2] - bufB[i+2]);
+        if (dr > tolerance || dg > tolerance || db > tolerance) changed++;
+        sampled++;
     }
-    return sum;
+    return sampled > 0 ? changed / sampled : 0;
 }
 
 // ── Core capture loop ─────────────────────────────────────────────────────────
@@ -65,32 +89,41 @@ async function captureAndCheck() {
 
         if (!sources || sources.length === 0) return;
 
-        const buffer = sources[0].thumbnail.toBitmap();
-        const hash   = pixelHash(buffer);
+        const bitmap = sources[0].thumbnail.toBitmap();
 
-        if (_lastHash !== null && hash === _lastHash) {
-            // Screen unchanged
-            _staticCount++;
-            if (!_screenIdle && _staticCount >= _framesForIdle) {
-                _screenIdle  = true;
-                _screenIdleAt = new Date();
-                console.log(`[WFH Monitor] Screen idle (${_staticCount} static frames)`);
-                if (_onScreenIdle) _onScreenIdle();
-            }
-        } else {
-            // Screen changed
-            _lastHash    = hash;
-            _staticCount = 0;
+        if (_lastBitmap !== null) {
+            const diffFraction  = pixelDiffFraction(bitmap, _lastBitmap);
+            const screenChanged = diffFraction > CHANGE_FRACTION_THRESHOLD;
 
-            if (_screenIdle) {
-                _screenIdle   = false;
-                _screenIdleAt = null;
-                console.log('[WFH Monitor] Screen active again');
-                if (_onScreenActive) _onScreenActive();
+            if (!screenChanged) {
+                // Screen unchanged (or only minor drift — cursor/clock/OS chrome)
+                _staticCount++;
+                if (!_screenIdle && _staticCount >= _framesForIdle) {
+                    _screenIdle   = true;
+                    _screenIdleAt = new Date();
+                    console.log(
+                        `[WFH Monitor] Screen idle after ${_staticCount} static frames` +
+                        ` (last diff ${(diffFraction * 100).toFixed(2)}%)`
+                    );
+                    if (_onScreenIdle) _onScreenIdle();
+                }
+            } else {
+                // Significant screen change — user is active
+                _staticCount = 0;
+                if (_screenIdle) {
+                    _screenIdle   = false;
+                    _screenIdleAt = null;
+                    console.log(`[WFH Monitor] Screen active again (diff ${(diffFraction * 100).toFixed(2)}%)`);
+                    if (_onScreenActive) _onScreenActive();
+                }
             }
         }
+
+        // Always update reference to the latest frame
+        _lastBitmap = bitmap;
+
     } catch (err) {
-        // desktopCapturer can fail if no display is attached (headless / RDP edge case)
+        // desktopCapturer fails when no display is attached (headless / RDP edge case)
         console.warn('[WFH Monitor] Capture failed:', err.message);
     }
 }
@@ -98,20 +131,19 @@ async function captureAndCheck() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Start the screen monitor.
- * Safe to call multiple times — stops any previous run first.
+ * Start the screen monitor. Safe to call multiple times — stops previous run.
  *
- * @param {number}   screenIdleThresholdSecs  How long screen must be static before it's idle (independent of input idle threshold)
- * @param {object}   config                   wfhConfig { intervalMs, width, height }
+ * @param {number}   screenIdleThresholdSecs  Seconds of static screen → idle
+ * @param {object}   config                   { intervalMs, width, height }
  * @param {Function} onScreenIdle             Called once when screen becomes idle
- * @param {Function} onScreenActive           Called once when screen becomes active again
+ * @param {Function} onScreenActive           Called once when screen becomes active
  */
 function start(screenIdleThresholdSecs, config, onScreenIdle, onScreenActive) {
     stop();
 
     if (config) {
         CAPTURE_INTERVAL_MS = Math.min(60000, Math.max(5000, config.intervalMs || 15000));
-        THUMB_W = config.width || 160;
+        THUMB_W = config.width  || 160;
         THUMB_H = config.height || 90;
     }
 
@@ -120,11 +152,15 @@ function start(screenIdleThresholdSecs, config, onScreenIdle, onScreenActive) {
     _onScreenActive = onScreenActive;
     _screenIdle     = false;
     _screenIdleAt   = null;
-    _lastHash       = null;
+    _lastBitmap     = null;
     _staticCount    = 0;
 
     _timer = setInterval(captureAndCheck, CAPTURE_INTERVAL_MS);
-    console.log(`[WFH Monitor] Started — threshold ${screenIdleThresholdSecs}s = ${_framesForIdle} static frames @ ${CAPTURE_INTERVAL_MS}ms interval`);
+    console.log(
+        `[WFH Monitor] Started — screen idle threshold ${screenIdleThresholdSecs}s` +
+        ` = ${_framesForIdle} frames @ ${CAPTURE_INTERVAL_MS}ms interval` +
+        ` (change threshold ${(CHANGE_FRACTION_THRESHOLD * 100).toFixed(0)}%)`
+    );
 }
 
 /** Stop the monitor and reset all state. */
@@ -135,17 +171,14 @@ function stop() {
     }
     _screenIdle   = false;
     _screenIdleAt = null;
-    _lastHash     = null;
+    _lastBitmap   = null;
     _staticCount  = 0;
-    // Only log if it was actually running
-    if (_onScreenIdle) {
-        console.log('[WFH Monitor] Stopped');
-    }
+    if (_onScreenIdle) console.log('[WFH Monitor] Stopped');
     _onScreenIdle   = null;
     _onScreenActive = null;
 }
 
-/** Returns true when the screen has been static for >= idleThresholdSecs. */
+/** Returns true when the screen has been static for >= screenIdleThresholdSecs. */
 function isScreenIdle() {
     return _screenIdle;
 }
