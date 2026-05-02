@@ -275,7 +275,7 @@ function startIdlePolling() {
         // WFH: require BOTH input idle AND screen idle before firing idle-start.
         // Office (default): input idle alone is sufficient — existing behaviour.
         const nowIdle = isWfhMode
-            ? (idleSecs >= IDLE_THRESHOLD_SECS && wfhScreenMonitor.isScreenIdle())
+            ? (idleSecs >= IDLE_THRESHOLD_SECS || wfhScreenMonitor.isScreenIdle())
             : (idleSecs >= IDLE_THRESHOLD_SECS);
 
         // ── Transition: Active → Idle ──────────────────────────────────────
