@@ -288,8 +288,8 @@ function startIdlePolling() {
             //   - Screen trigger: when the screen actually went static
             // Whichever happened first is the true idle start.
             const inputIdleStart = new Date(Date.now() - idleSecs * 1000);
-            const screenIdleAt   = isWfhMode ? (wfhScreenMonitor.getScreenIdleAt() ?? inputIdleStart) : inputIdleStart;
-            const idleStartTime  = (screenIdleAt < inputIdleStart ? screenIdleAt : inputIdleStart).toISOString();
+            const screenIdleAt = isWfhMode ? (wfhScreenMonitor.getScreenIdleAt() ?? inputIdleStart) : inputIdleStart;
+            const idleStartTime = (screenIdleAt < inputIdleStart ? screenIdleAt : inputIdleStart).toISOString();
 
             console.log(`[Idle] User went idle. Input idle: ${idleSecs}s, screen idle: ${screenIdle} (Threshold: ${IDLE_THRESHOLD_SECS}s) started at: ${idleStartTime}`);
             mainWindow.webContents.send('idle-start', idleStartTime);
@@ -361,6 +361,11 @@ function createWindow() {
             nodeIntegration: false,     // security: no direct Node access in renderer
             contextIsolation: true,     // security: renderer and preload have separate contexts
             preload: path.join(__dirname, 'preload.js'),
+            // In dev the renderer loads from http://localhost:5173, which the production
+            // backend's CORS list doesn't include. Disabling webSecurity removes the
+            // browser-side CORS check so dev fetches reach the production API.
+            // Production builds load from file:// (no origin) → CORS never applies there.
+            webSecurity: !isDev,
         },
         backgroundColor: '#0a0b0f',
         show: false, // show only after ready-to-show to avoid white flash
@@ -439,7 +444,7 @@ app.whenReady().then(() => {
 
     // ── IPC: App Tracker ──────────────────────────────────────────────────────
     ipcMain.handle('get-app-usage', async () => {
-        return usageMonitor.getUsageData();
+        return tracker.getCurrentData();
     });
 
     ipcMain.handle('get-app-version', () => {
@@ -488,10 +493,11 @@ app.whenReady().then(() => {
 
     ipcMain.on('set-wfh-screen-idle-threshold', (_event, seconds) => {
         if (typeof seconds === 'number' && seconds >= 10) {
-            WFH_SCREEN_IDLE_THRESHOLD_SECS = Math.round(seconds);
-            console.log(`[WFH] Screen idle threshold updated to ${WFH_SCREEN_IDLE_THRESHOLD_SECS}s`);
-            // Restart monitor so _framesForIdle is recalculated with new threshold.
-            if (isWfhMode) {
+            const newThreshold = Math.round(seconds);
+            const changed = newThreshold !== WFH_SCREEN_IDLE_THRESHOLD_SECS;
+            WFH_SCREEN_IDLE_THRESHOLD_SECS = newThreshold;
+            if (isWfhMode && changed) {
+                console.log(`[WFH] Screen idle threshold changed to ${WFH_SCREEN_IDLE_THRESHOLD_SECS}s — restarting monitor`);
                 wfhScreenMonitor.start(
                     WFH_SCREEN_IDLE_THRESHOLD_SECS,
                     wfhConfig,
@@ -510,11 +516,17 @@ app.whenReady().then(() => {
 
     ipcMain.on('set-wfh-config', (_event, config) => {
         if (config && typeof config === 'object') {
-            wfhConfig.intervalMs = config.intervalMs ?? wfhConfig.intervalMs;
-            wfhConfig.width = config.width ?? wfhConfig.width;
-            wfhConfig.height = config.height ?? wfhConfig.height;
-            console.log(`[WFH] Capture config updated: intervalMs=${wfhConfig.intervalMs}, width=${wfhConfig.width}, height=${wfhConfig.height}`);
-            if (isWfhMode) {
+            const newIntervalMs = config.intervalMs ?? wfhConfig.intervalMs;
+            const newWidth      = config.width      ?? wfhConfig.width;
+            const newHeight     = config.height     ?? wfhConfig.height;
+            const changed = newIntervalMs !== wfhConfig.intervalMs ||
+                            newWidth      !== wfhConfig.width      ||
+                            newHeight     !== wfhConfig.height;
+            wfhConfig.intervalMs = newIntervalMs;
+            wfhConfig.width      = newWidth;
+            wfhConfig.height     = newHeight;
+            if (isWfhMode && changed) {
+                console.log(`[WFH] Capture config changed — restarting monitor: intervalMs=${wfhConfig.intervalMs}`);
                 wfhScreenMonitor.start(
                     WFH_SCREEN_IDLE_THRESHOLD_SECS,
                     wfhConfig,

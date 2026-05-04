@@ -31,9 +31,10 @@ const { desktopCapturer } = require('electron');
 // ── Configurable constants ────────────────────────────────────────────────────
 
 // Fraction of sampled pixels that must differ to count as "screen changed".
-// Below this → ignored (cursor blink ~0.01%, clock tick ~0.06%, minor chrome ~0.1%).
-// Above this → real change (navigation, new window, content update typically > 2%).
-const CHANGE_FRACTION_THRESHOLD = 0.02; // 2 %
+// Below this → ignored (cursor blink ~0.01%, clock tick ~0.06%, minor chrome ~0.1%,
+//              on-screen timer text in browser/app widget ~1–2.5%).
+// Above this → real change (navigation, new window, content update typically > 4%).
+const CHANGE_FRACTION_THRESHOLD = 0.03; // 3 %
 
 // Default capture settings (overridden by start() config)
 let CAPTURE_INTERVAL_MS = 15000;
@@ -95,8 +96,16 @@ async function captureAndCheck() {
             const diffFraction  = pixelDiffFraction(bitmap, _lastBitmap);
             const screenChanged = diffFraction > CHANGE_FRACTION_THRESHOLD;
 
+            // Per-frame debug: shows diff % and frame count every capture so you
+            // can see what's causing the screen to be detected as changed.
+            console.log(
+                `[WFH Monitor] frame diff=${(diffFraction * 100).toFixed(2)}%` +
+                ` threshold=${(CHANGE_FRACTION_THRESHOLD * 100).toFixed(0)}%` +
+                ` → ${screenChanged ? 'CHANGED (reset)' : `static [${_staticCount + 1}/${_framesForIdle}]`}`
+            );
+
             if (!screenChanged) {
-                // Screen unchanged (or only minor drift — cursor/clock/OS chrome)
+                
                 _staticCount++;
                 if (!_screenIdle && _staticCount >= _framesForIdle) {
                     _screenIdle   = true;
@@ -108,7 +117,7 @@ async function captureAndCheck() {
                     if (_onScreenIdle) _onScreenIdle();
                 }
             } else {
-                // Significant screen change — user is active
+               
                 _staticCount = 0;
                 if (_screenIdle) {
                     _screenIdle   = false;
