@@ -278,7 +278,10 @@ async function sendBreakToggle(context) {
 // ── OTA Updates (Configuration) ──────────────────────────────────────────────
 
 autoUpdater.autoDownload = true; // Download silently in the background
-autoUpdater.allowPrerelease = true;
+// Stable builds should use GitHub's latest-release endpoint. Enabling prerelease
+// makes electron-updater trust the releases Atom feed, which can be misordered
+// if a tag/release has an incorrect future date.
+autoUpdater.allowPrerelease = false;
 
 // Configure logging for updates
 autoUpdater.logger = console;
