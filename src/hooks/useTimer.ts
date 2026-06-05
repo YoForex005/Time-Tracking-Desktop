@@ -357,10 +357,11 @@ export function useTimer() {
         return () => clearInterval(interval);
     }, [fetchStatus]);
 
-    // Keep the active shift alive. If the app reconnects within 5 minutes,
-    // backend clears pending disconnect and keeps the same shift running.
+    // Browser/dev fallback only. In Electron, main.js owns heartbeat so it
+    // keeps running even if the renderer timer is throttled in the background.
     useEffect(() => {
         if (status !== 'working' && status !== 'on_break') return;
+        if (window.electronAPI) return;
 
         const tickHeartbeat = async () => {
             try {

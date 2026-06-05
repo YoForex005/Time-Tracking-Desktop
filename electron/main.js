@@ -113,6 +113,7 @@ let wfhConfig = {
  * second has negligible CPU impact.
  */
 const IDLE_POLL_INTERVAL_MS = 1_000; // 1 second
+const HEARTBEAT_INTERVAL_MS = 20_000;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -128,6 +129,8 @@ let disconnectIntentSent = false;
 let currentShiftStatus = 'stopped'; // 'stopped' | 'working' | 'on_break'
 let sleepBreakStarted = false;      // true if THIS sleep triggered a break
 let isWfhMode = false;              // true when active shift has workLocation === 'wfh'
+let heartbeatTimer = null;
+let heartbeatInFlight = false;
 
 function normalizeAuthToken(token) {
     if (typeof token !== 'string') return null;
@@ -184,6 +187,64 @@ async function sendDisconnectIntent(reason) {
         const message = err && err.message ? err.message : 'unknown error';
         console.warn('[Session] Failed to send disconnect intent:', message);
     }
+}
+
+async function sendHeartbeatPing(context = 'interval') {
+    if (!sessionAuthToken) return false;
+    if (currentShiftStatus !== 'working' && currentShiftStatus !== 'on_break') return false;
+    if (heartbeatInFlight) return false;
+
+    heartbeatInFlight = true;
+
+    try {
+        const eventTime = new Date();
+        await axios.post(
+            `${API_BASE}/time/heartbeat`,
+            buildClientTimestampPayload(eventTime),
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${sessionAuthToken}`,
+                },
+                timeout: 4000,
+            }
+        );
+        console.log(`[Heartbeat] Sent from main process (${context})`);
+        return true;
+    } catch (err) {
+        const message = err && err.message ? err.message : 'unknown error';
+        console.warn(`[Heartbeat] Failed from main process (${context}):`, message);
+        return false;
+    } finally {
+        heartbeatInFlight = false;
+    }
+}
+
+function stopHeartbeatLoop() {
+    if (!heartbeatTimer) return;
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    console.log('[Heartbeat] Main-process heartbeat stopped');
+}
+
+function syncHeartbeatLoop() {
+    const shouldRun =
+        !!sessionAuthToken &&
+        (currentShiftStatus === 'working' || currentShiftStatus === 'on_break');
+
+    if (!shouldRun) {
+        stopHeartbeatLoop();
+        return;
+    }
+
+    void sendHeartbeatPing(heartbeatTimer ? 'status-sync' : 'start');
+
+    if (heartbeatTimer) return;
+
+    heartbeatTimer = setInterval(() => {
+        void sendHeartbeatPing();
+    }, HEARTBEAT_INTERVAL_MS);
+    console.log('[Heartbeat] Main-process heartbeat started');
 }
 
 /**
@@ -423,6 +484,7 @@ function createWindow() {
             // browser-side CORS check so dev fetches reach the production API.
             // Production builds load from file:// (no origin) → CORS never applies there.
             webSecurity: !isDev,
+            backgroundThrottling: false,
         },
         backgroundColor: '#0a0b0f',
         show: false, // show only after ready-to-show to avoid white flash
@@ -518,6 +580,7 @@ app.whenReady().then(() => {
         screenshotScheduler.setAuthToken(token);
         sessionAuthToken = normalizeAuthToken(token);
         disconnectIntentSent = false;
+        syncHeartbeatLoop();
     });
 
     ipcMain.on('clear-tracker-auth-token', () => {
@@ -525,6 +588,7 @@ app.whenReady().then(() => {
         screenshotScheduler.clearAuthToken();
         sessionAuthToken = null;
         disconnectIntentSent = false;
+        syncHeartbeatLoop();
     });
 
     // ── IPC: Shift Status Sync ────────────────────────────────────────────────
@@ -534,6 +598,7 @@ app.whenReady().then(() => {
         if (typeof status === 'string') {
             currentShiftStatus = status;
             console.log(`[Sleep] Shift status updated to '${currentShiftStatus}'`);
+            syncHeartbeatLoop();
         }
     });
 
@@ -667,8 +732,11 @@ app.whenReady().then(() => {
     startScreenLockDetection(); // begin monitoring screen lock/unlock
 
     app.on('before-quit', () => {
+        stopHeartbeatLoop();
         void sendDisconnectIntent('before_quit');
     });
+
+    app.on('before-quit-for-update', stopHeartbeatLoop);
 
     // ── OTA: Kill backend before update installs ──────────────────────────────
     // electron-updater fires this event just before quitAndInstall() hands
@@ -683,6 +751,7 @@ app.whenReady().then(() => {
     });
 
     powerMonitor.on('shutdown', () => {
+        stopHeartbeatLoop();
         void sendDisconnectIntent('system_shutdown');
     });
 
@@ -747,6 +816,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     tracker.stopTracking();
     screenshotScheduler.stop();
+    stopHeartbeatLoop();
     if (backendProcess) backendProcess.kill();
     if (process.platform !== 'darwin') app.quit();
 });
