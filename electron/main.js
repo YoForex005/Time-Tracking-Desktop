@@ -122,6 +122,9 @@ let backendProcess = null;
 let pendingAuthCallbackUrl = null;
 let sessionAuthToken = null;
 let disconnectIntentSent = false;
+let exitIntentInProgress = false;
+let forceQuitAfterExitIntent = false;
+let quittingForUpdate = false;
 
 // Tracks the current shift status so main.js can act on sleep/suspend
 // without waiting for the renderer (which may be too slow before network drops).
@@ -159,9 +162,11 @@ function buildClientTimestampPayload(date = new Date()) {
     };
 }
 
-async function sendDisconnectIntent(reason) {
-    if (!sessionAuthToken) return;
-    if (disconnectIntentSent) return;
+async function sendDisconnectIntent(reason, options = {}) {
+    const timeoutMs = options.timeoutMs || 3000;
+
+    if (!sessionAuthToken) return false;
+    if (disconnectIntentSent) return true;
 
     disconnectIntentSent = true;
 
@@ -179,14 +184,33 @@ async function sendDisconnectIntent(reason) {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${sessionAuthToken}`,
                 },
-                timeout: 3000,
+                timeout: timeoutMs,
             }
         );
         console.log('[Session] Disconnect intent sent to backend');
+        return true;
     } catch (err) {
         const message = err && err.message ? err.message : 'unknown error';
         console.warn('[Session] Failed to send disconnect intent:', message);
+        return false;
     }
+}
+
+function shouldSendExitIntent() {
+    return !!sessionAuthToken;
+}
+
+function sendExitIntentThenQuit(reason, options = {}) {
+    if (exitIntentInProgress) return;
+
+    exitIntentInProgress = true;
+    stopHeartbeatLoop();
+
+    void sendDisconnectIntent(reason, { timeoutMs: options.timeoutMs || 2500 })
+        .finally(() => {
+            forceQuitAfterExitIntent = true;
+            app.quit();
+        });
 }
 
 async function sendHeartbeatPing(context = 'interval') {
@@ -734,12 +758,26 @@ app.whenReady().then(() => {
     startIdlePolling();        // begin monitoring system idle time
     startScreenLockDetection(); // begin monitoring screen lock/unlock
 
-    app.on('before-quit', () => {
+    app.on('before-quit', (event) => {
         stopHeartbeatLoop();
-        void sendDisconnectIntent('before_quit');
+
+        if (forceQuitAfterExitIntent || quittingForUpdate || !shouldSendExitIntent()) {
+            if (quittingForUpdate) {
+                void sendDisconnectIntent('before_quit_for_update', { timeoutMs: 1500 });
+            }
+            return;
+        }
+
+        if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+        }
+        sendExitIntentThenQuit('before_quit');
     });
 
-    app.on('before-quit-for-update', stopHeartbeatLoop);
+    app.on('before-quit-for-update', () => {
+        quittingForUpdate = true;
+        stopHeartbeatLoop();
+    });
 
     // ── OTA: Kill backend before update installs ──────────────────────────────
     // electron-updater fires this event just before quitAndInstall() hands
@@ -753,9 +791,16 @@ app.whenReady().then(() => {
         }
     });
 
-    powerMonitor.on('shutdown', () => {
-        stopHeartbeatLoop();
-        void sendDisconnectIntent('system_shutdown');
+    powerMonitor.on('shutdown', (event) => {
+        if (!shouldSendExitIntent()) {
+            stopHeartbeatLoop();
+            return;
+        }
+
+        if (event && typeof event.preventDefault === 'function') {
+            event.preventDefault();
+        }
+        sendExitIntentThenQuit('system_shutdown', { timeoutMs: 2500 });
     });
 
     // ── Sleep / Resume Detection ─────────────────────────────────────────────
