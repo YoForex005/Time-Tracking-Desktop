@@ -292,7 +292,7 @@ function normalizeUrl(rawUrl) {
 }
 
 async function getRunningApps() {
-    if (process.platform === 'darwin') {
+    if (process.platform === 'darwin' || process.platform === 'linux') {
         try {
             const activeWin = require('active-win');
             const win = await activeWin({ screenRecordingPermission: false }); // false avoids annoying popups instantly if denied, though they must enable it manually
@@ -309,7 +309,7 @@ async function getRunningApps() {
                 IsForeground: true
             }];
         } catch (err) {
-            console.log('[Tracker] Mac active-win error:', err.message);
+            console.log('[Tracker] active-win error:', err.message);
             return [];
         }
     }

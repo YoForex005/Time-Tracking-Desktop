@@ -90,6 +90,27 @@ async function captureCurrentMonitorPng() {
             });
         });
     }
+    if (process.platform === 'linux') {
+        const { desktopCapturer, screen } = require('electron');
+        try {
+            const primaryDisplay = screen.getPrimaryDisplay();
+            const { width, height } = primaryDisplay.bounds;
+            const sources = await desktopCapturer.getSources({
+                types: ['screen'],
+                thumbnailSize: { width, height },
+            });
+            if (!sources || sources.length === 0) {
+                throw new Error('No screen sources found');
+            }
+            const imageBuffer = sources[0].thumbnail.toPNG();
+            return {
+                imageBuffer,
+                display: { width, height, x: 0, y: 0 }
+            };
+        } catch (e) {
+            throw new Error('Linux screenshot via desktopCapturer failed: ' + e.message);
+        }
+    }
 
     const raw = await executePowerShell(PS_CAPTURE_SCRIPT);
     if (!raw) {

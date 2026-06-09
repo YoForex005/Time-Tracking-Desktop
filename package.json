@@ -12,6 +12,7 @@
     "electron:build": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
     "electron:build:mac": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --x64 --arm64",
     "electron:build:mac:signed": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=true electron-builder --mac",
+    "electron:build:linux": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --linux --x64",
     "electron:publish": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win -p always",
     "preview": "vite preview"
   },
@@ -77,6 +78,21 @@
         "dmg"
       ],
       "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "icon": "build/icon.png"
+    },
+    "deb": {
+      "depends": [
+        "libnotify4",
+        "libxtst6",
+        "libnss3"
+      ]
     },
     "nsis": {
       "oneClick": true,
