@@ -21,11 +21,41 @@ const { app, BrowserWindow, ipcMain, powerMonitor, shell } = require('electron')
 const { autoUpdater } = require('electron-updater');
 const axios = require('axios');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const tracker = require('./tracking/tracker');
 const screenshotScheduler = require('./tracking/screenshotScheduler');
 const wfhScreenMonitor = require('./tracking/wfhScreenMonitor');
 const { URL } = require('url');
+
+function loadLocalEnv() {
+    const envPath = path.join(__dirname, '..', '.env');
+    if (!fs.existsSync(envPath)) return;
+
+    const envText = fs.readFileSync(envPath, 'utf8');
+    for (const line of envText.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+
+        const eqIndex = trimmed.indexOf('=');
+        if (eqIndex <= 0) continue;
+
+        const key = trimmed.slice(0, eqIndex).trim();
+        let value = trimmed.slice(eqIndex + 1).trim();
+        if (
+            (value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))
+        ) {
+            value = value.slice(1, -1);
+        }
+
+        if (process.env[key] === undefined) {
+            process.env[key] = value;
+        }
+    }
+}
+
+loadLocalEnv();
 
 // Set the app name explicitly for the taskbar and OS integration
 app.setName('YO HRMX');
@@ -56,6 +86,9 @@ if (!gotSingleInstanceLock) {
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 const API_BASE = process.env.API_BASE || 'https://hrmsbackend.yoforex.net/api';
+const WEB_APP_URL = process.env.WEB_APP_URL || (isDev ? 'http://localhost:3000' : 'https://hrms.yoforex.net');
+console.log(`[Config] API_BASE=${API_BASE}`);
+console.log(`[Config] WEB_APP_URL=${WEB_APP_URL}`);
 
 /**
  * Idle threshold in seconds — mutable so the renderer can push the
@@ -102,6 +135,27 @@ function normalizeAuthToken(token) {
     return normalized || null;
 }
 
+function formatLocalIsoWithOffset(date = new Date()) {
+    const pad = (value, size = 2) => String(value).padStart(size, '0');
+    const offsetMinutes = -date.getTimezoneOffset();
+    const sign = offsetMinutes >= 0 ? '+' : '-';
+    const absOffset = Math.abs(offsetMinutes);
+    const offsetHours = Math.floor(absOffset / 60);
+    const offsetMins = absOffset % 60;
+
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+        `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+        `.${pad(date.getMilliseconds(), 3)}${sign}${pad(offsetHours)}:${pad(offsetMins)}`;
+}
+
+function buildClientTimestampPayload(date = new Date()) {
+    return {
+        clientLocalTime: formatLocalIsoWithOffset(date),
+        clientTimezoneOffsetMinutes: date.getTimezoneOffset(),
+        clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+}
+
 async function sendDisconnectIntent(reason) {
     if (!sessionAuthToken) return;
     if (disconnectIntentSent) return;
@@ -109,11 +163,13 @@ async function sendDisconnectIntent(reason) {
     disconnectIntentSent = true;
 
     try {
+        const eventTime = new Date();
         await axios.post(
             `${API_BASE}/time/disconnect-intent`,
             {
                 reason: reason || 'desktop_exit',
-                disconnectedAt: new Date().toISOString(),
+                disconnectedAt: formatLocalIsoWithOffset(eventTime),
+                ...buildClientTimestampPayload(eventTime),
             },
             {
                 headers: {
@@ -140,7 +196,7 @@ async function sendBreakToggle(context) {
     try {
         await axios.post(
             `${API_BASE}/time/break`,
-            {},
+            buildClientTimestampPayload(),
             {
                 headers: {
                     'Content-Type': 'application/json',
@@ -289,7 +345,8 @@ function startIdlePolling() {
             // Whichever happened first is the true idle start.
             const inputIdleStart = new Date(Date.now() - idleSecs * 1000);
             const screenIdleAt = isWfhMode ? (wfhScreenMonitor.getScreenIdleAt() ?? inputIdleStart) : inputIdleStart;
-            const idleStartTime = (screenIdleAt < inputIdleStart ? screenIdleAt : inputIdleStart).toISOString();
+            const idleStartDate = screenIdleAt < inputIdleStart ? screenIdleAt : inputIdleStart;
+            const idleStartTime = formatLocalIsoWithOffset(idleStartDate);
 
             console.log(`[Idle] User went idle. Input idle: ${idleSecs}s, screen idle: ${screenIdle} (Threshold: ${IDLE_THRESHOLD_SECS}s) started at: ${idleStartTime}`);
             mainWindow.webContents.send('idle-start', idleStartTime);
@@ -571,7 +628,7 @@ app.whenReady().then(() => {
     // We embed it as ?desktopCode=<uuid> so the website POSTs the session
     // to the backend by that code. The renderer polls the backend every 2s.
     ipcMain.on('open-login', (_event, deviceCode) => {
-        const loginUrl = new URL('https://hrms.yoforex.net/login');
+        const loginUrl = new URL('/login', WEB_APP_URL);
         loginUrl.searchParams.set('desktopCode', String(deviceCode));
         loginUrl.searchParams.set('returnTo', 'desktop');
         shell.openExternal(loginUrl.toString());
@@ -579,7 +636,7 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('open-dashboard', () => {
-        shell.openExternal('https://hrms.yoforex.net/dashboard');
+        shell.openExternal(new URL('/dashboard', WEB_APP_URL).toString());
         console.log('[Auth] Opened browser dashboard');
     });
 

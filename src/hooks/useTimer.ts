@@ -19,7 +19,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     getStatus, startShift, toggleBreak, stopShift, getHistory, sendHeartbeat,
     startIdleSession, endIdleSession, getTodayIdleSecs,
-    subscribeToThresholdEvents,
+    subscribeToThresholdEvents, rolloverMidnight,
 } from '../api';
 
 
@@ -31,7 +31,7 @@ export interface HistoryShift {
     id: string;
     startTime: string;
     endTime: string | null;
-    checkoutType?: 'manual' | 'auto_shutdown';
+    checkoutType?: 'manual' | 'auto_shutdown' | 'midnight_rollover';
     checkoutReason?: string | null;
     graceAppliedSecs?: number;
     timeAdjustmentSecs?: number;
@@ -94,6 +94,31 @@ function calcTotalBreakSecs(breaks: HistoryShift['breaks']): number {
         if (!b.startTime) return acc;
         return acc + calcDuration(b.startTime, b.endTime);
     }, 0);
+}
+
+/** Calculate seconds inside a local day/window only. */
+function calcDurationInRange(start: string, end: string | null, rangeStartMs: number, rangeEndMs: number): number {
+    const startMs = Math.max(new Date(start).getTime(), rangeStartMs);
+    const endMs = Math.min(end ? new Date(end).getTime() : Date.now(), rangeEndMs);
+    return Math.max(0, Math.floor((endMs - startMs) / 1000));
+}
+
+function calcTotalBreakSecsInRange(
+    breaks: HistoryShift['breaks'],
+    rangeStartMs: number,
+    rangeEndMs: number
+): number {
+    return breaks.reduce((acc, b) => {
+        if (!b.startTime) return acc;
+        return acc + calcDurationInRange(b.startTime, b.endTime, rangeStartMs, rangeEndMs);
+    }, 0);
+}
+
+function getNextLocalMidnight(): Date {
+    const next = new Date();
+    next.setDate(next.getDate() + 1);
+    next.setHours(0, 0, 0, 0);
+    return next;
 }
 
 /** Format a seconds count as HH:MM:SS */
@@ -353,6 +378,33 @@ export function useTimer() {
         return () => clearInterval(interval);
     }, [status]);
 
+    // Split an active shift at local midnight so each day is calculated in
+    // the machine's 00:00:00 -> 23:59:59 calendar box.
+    useEffect(() => {
+        if (status === 'stopped' || !currentShift) return;
+
+        const rolloverAt = getNextLocalMidnight();
+        const delayMs = Math.max(0, rolloverAt.getTime() - Date.now());
+
+        const timeout = window.setTimeout(async () => {
+            try {
+                const wasIdle = !!idleSessionStartTime;
+                const result = await rolloverMidnight({ rolloverAt, continueIdle: wasIdle });
+                if (result.shift && typeof result.shift === 'object') {
+                    setCurrentShift(result.shift as HistoryShift);
+                }
+                if (wasIdle) setIdleSessionStartTime(new Date(rolloverAt));
+                await fetchStatus();
+                await fetchHistory();
+                await fetchIdleSecs();
+            } catch (err) {
+                console.warn('[Midnight] Failed to roll over active shift:', err);
+            }
+        }, delayMs);
+
+        return () => clearTimeout(timeout);
+    }, [status, currentShift, idleSessionStartTime, fetchStatus, fetchHistory, fetchIdleSecs]);
+
 
     // ── Shift status sync to main process ──────────────────────────────────────
     // Keep main.js informed so it can guard the sleep break correctly.
@@ -557,9 +609,11 @@ export function useTimer() {
     let elapsedSecs = 0;
 
     if (currentShift) {
-        const totalElapsed = calcDuration(currentShift.startTime, null);
-        activeBreakSecs = calcTotalBreakSecs(currentShift.breaks);
-        activeWork = Math.max(0, totalElapsed - activeBreakSecs);
+        const nowMs = Date.now();
+        const totalElapsed = calcDurationInRange(currentShift.startTime, null, todayStart, nowMs);
+        activeBreakSecs = calcTotalBreakSecsInRange(currentShift.breaks, todayStart, nowMs);
+        const adjustmentSecs = (currentShift.timeAdjustmentSecs ?? 0) + (currentShift.graceAppliedSecs ?? 0);
+        activeWork = Math.max(0, totalElapsed - activeBreakSecs + adjustmentSecs);
         elapsedSecs = totalElapsed;
     }
 

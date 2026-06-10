@@ -41,6 +41,36 @@ function authHeaders() {
     };
 }
 
+export function formatLocalIsoWithOffset(date = new Date()): string {
+    const pad = (value: number, size = 2) => String(value).padStart(size, '0');
+    const offsetMinutes = -date.getTimezoneOffset();
+    const sign = offsetMinutes >= 0 ? '+' : '-';
+    const absOffset = Math.abs(offsetMinutes);
+    const offsetHours = Math.floor(absOffset / 60);
+    const offsetMins = absOffset % 60;
+
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+        `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+        `.${pad(date.getMilliseconds(), 3)}${sign}${pad(offsetHours)}:${pad(offsetMins)}`;
+}
+
+function clientTimestampPayload(date = new Date()) {
+    return {
+        clientLocalTime: formatLocalIsoWithOffset(date),
+        clientTimezoneOffsetMinutes: date.getTimezoneOffset(),
+        clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+}
+
+function clientTimestampQuery(date = new Date()): string {
+    const params = new URLSearchParams();
+    const payload = clientTimestampPayload(date);
+    params.set('clientLocalTime', payload.clientLocalTime);
+    params.set('clientTimezoneOffsetMinutes', String(payload.clientTimezoneOffsetMinutes));
+    params.set('clientTimeZone', payload.clientTimeZone);
+    return params.toString();
+}
+
 
 export async function login(email: string, password: string) {
     const res = await fetch(`${API_BASE}/auth/login`, {
@@ -65,7 +95,14 @@ export async function getStatus() {
     const data = await handleResponse(res);
     return data as {
         status: 'stopped' | 'working' | 'on_break';
-        shift: unknown;
+        shift: {
+            id: string;
+            startTime: string;
+            breaks: Array<{ id: string; startTime: string; endTime: string | null }>;
+            workLocation?: string;
+            graceAppliedSecs?: number;
+            timeAdjustmentSecs?: number;
+        } | null;
         idleThresholdSecs: number;
         expectedWorkSecs: number;
         expectedActiveSecs: number;
@@ -82,23 +119,49 @@ export async function startShift(workLocation: 'wfh' | 'office') {
     const res = await fetch(`${API_BASE}/time/start`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ work_location: workLocation }),
+        body: JSON.stringify({ work_location: workLocation, ...clientTimestampPayload() }),
     });
     return handleResponse(res);
 }
 
 export async function toggleBreak() {
-    const res = await fetch(`${API_BASE}/time/break`, { method: 'POST', headers: authHeaders() });
+    const res = await fetch(`${API_BASE}/time/break`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(clientTimestampPayload()),
+    });
     return handleResponse(res);
 }
 
 export async function stopShift() {
-    const res = await fetch(`${API_BASE}/time/stop`, { method: 'POST', headers: authHeaders() });
+    const res = await fetch(`${API_BASE}/time/stop`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(clientTimestampPayload()),
+    });
     return handleResponse(res);
 }
 
 export async function sendHeartbeat() {
-    const res = await fetch(`${API_BASE}/time/heartbeat`, { method: 'POST', headers: authHeaders() });
+    const res = await fetch(`${API_BASE}/time/heartbeat`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(clientTimestampPayload()),
+    });
+    return handleResponse(res);
+}
+
+export async function rolloverMidnight(options: { rolloverAt?: Date; continueIdle?: boolean } = {}) {
+    const rolloverAt = options.rolloverAt ?? new Date();
+    const res = await fetch(`${API_BASE}/time/rollover-midnight`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+            ...clientTimestampPayload(rolloverAt),
+            rolloverAt: formatLocalIsoWithOffset(rolloverAt),
+            continueIdle: options.continueIdle === true,
+        }),
+    });
     return handleResponse(res);
 }
 
@@ -109,7 +172,7 @@ export async function getHistory() {
         id: string;
         startTime: string;
         endTime: string | null;
-        checkoutType?: 'manual' | 'auto_shutdown';
+        checkoutType?: 'manual' | 'auto_shutdown' | 'midnight_rollover';
         checkoutReason?: string | null;
         graceAppliedSecs?: number;
         timeAdjustmentSecs?: number;
@@ -132,7 +195,7 @@ export async function startIdleSession(startTime: string) {
     const res = await fetch(`${API_BASE}/time/idle/start`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ startTime }),
+        body: JSON.stringify({ startTime, ...clientTimestampPayload() }),
     });
     // 409 = idle session already open — not a client error
     if (res.status === 409) return res.json();
@@ -140,12 +203,16 @@ export async function startIdleSession(startTime: string) {
 }
 
 export async function endIdleSession() {
-    const res = await fetch(`${API_BASE}/time/idle/end`, { method: 'POST', headers: authHeaders() });
+    const res = await fetch(`${API_BASE}/time/idle/end`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(clientTimestampPayload()),
+    });
     return handleResponse(res);
 }
 
 export async function getTodayIdleSecs(): Promise<number> {
-    const res = await fetch(`${API_BASE}/time/idle/today`, { headers: authHeaders() });
+    const res = await fetch(`${API_BASE}/time/idle/today?${clientTimestampQuery()}`, { headers: authHeaders() });
     const data = await handleResponse(res);
     return (data as { totalIdleSecs: number }).totalIdleSecs;
 }
