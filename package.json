@@ -1,7 +1,7 @@
 {
   "name": "workfolio-desktop",
   "private": true,
-  "version": "1.2.27",
+  "version": "1.2.28",
   "description": "YO HRMX Time Tracking Desktop App",
   "author": {
     "name": "YoForex",
@@ -68,7 +68,6 @@
       "electron/**/*"
     ],
     "win": {
-      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",
