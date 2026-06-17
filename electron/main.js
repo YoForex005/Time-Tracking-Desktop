@@ -85,7 +85,7 @@ if (!gotSingleInstanceLock) {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-const API_BASE = process.env.API_BASE || 'https://hrmsbackend.yoforex.net/api';
+const API_BASE = process.env.API_BASE || (isDev ? 'http://localhost:3005/api' : 'https://hrmsbackend.yoforex.net/api');
 const WEB_APP_URL = process.env.WEB_APP_URL || (isDev ? 'http://localhost:3000' : 'https://hrms.yoforex.net');
 console.log(`[Config] API_BASE=${API_BASE}`);
 console.log(`[Config] WEB_APP_URL=${WEB_APP_URL}`);

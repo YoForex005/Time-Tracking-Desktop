@@ -608,6 +608,11 @@ export function useTimer() {
     let activeBreakSecs = 0;
     let elapsedSecs = 0;
 
+    const liveActiveSecs = idleSessionStartTime
+        ? Math.floor((Date.now() - idleSessionStartTime.getTime()) / 1000)
+        : 0;
+    const todayIdleSecs = closedIdleSecs + liveActiveSecs;
+
     if (currentShift) {
         const nowMs = Date.now();
         const totalElapsed = calcDurationInRange(currentShift.startTime, null, todayStart, nowMs);
@@ -628,11 +633,6 @@ export function useTimer() {
     // `liveActiveSecs` = seconds since the current idle session started (if any).
     // Together they give a smooth second-by-second idle counter, just like
     // todayWorked / todayBreakSecs are computed on every tick.
-    const liveActiveSecs = idleSessionStartTime
-        ? Math.floor((Date.now() - idleSessionStartTime.getTime()) / 1000)
-        : 0;
-    const todayIdleSecs = closedIdleSecs + liveActiveSecs;
-
     // ── Actions ───────────────────────────────────────────────────────────────
 
     const handleStart = async (workLocation: 'wfh' | 'office') => {
