@@ -41,7 +41,6 @@ export function useAppTracker() {
             const now = Date.now();
             if (now - lastSyncTime.current >= SYNC_INTERVAL_MS) {
                 lastSyncTime.current = now;
-                console.log('[useAppTracker] Syncing usage data to backend...', data.usage.length, 'apps/sites recorded.');
                 syncUsageData(data.usage);
             }
         };

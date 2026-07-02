@@ -220,6 +220,7 @@ let currentApp = null;
 let lastSeenPids = new Set();
 let lastSyncTime = Date.now();
 let authToken = null;
+let missingAuthTokenLogged = false;
 
 function normalizeProcessName(processName) {
     if (!processName) return '';
@@ -434,7 +435,10 @@ async function recordActiveWindow() {
 async function syncDataToBackend(data) {
     if (!data || !data.usage || data.usage.length === 0) return;
     if (!authToken) {
-        console.log('[Tracker] Sync skipped: auth token missing');
+        if (!missingAuthTokenLogged) {
+            console.log('[Tracker] Sync paused: auth token missing');
+            missingAuthTokenLogged = true;
+        }
         return;
     }
 
@@ -464,18 +468,28 @@ async function syncDataToBackend(data) {
 
 function setAuthToken(token) {
     if (typeof token !== 'string') {
-        authToken = null;
+        clearAuthToken();
         return;
     }
 
     const normalized = token.trim().replace(/^Bearer\s+/i, '');
-    authToken = normalized || null;
-    console.log(authToken ? '[Tracker] Auth token set for usage sync' : '[Tracker] Auth token cleared');
+    const nextToken = normalized || null;
+    const hadToken = !!authToken;
+    authToken = nextToken;
+    missingAuthTokenLogged = false;
+
+    if (authToken) {
+        console.log('[Tracker] Auth token set for usage sync');
+    } else if (hadToken) {
+        console.log('[Tracker] Auth token cleared');
+    }
 }
 
 function clearAuthToken() {
+    const hadToken = !!authToken;
     authToken = null;
-    console.log('[Tracker] Auth token cleared');
+    missingAuthTokenLogged = false;
+    if (hadToken) console.log('[Tracker] Auth token cleared');
 }
 
 function getUsageArray() {

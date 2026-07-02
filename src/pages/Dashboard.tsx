@@ -1,6 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useTimer, formatDuration } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
+import { useOvertimePrompt } from '../components/OvertimePromptProvider';
+
+const OFFICE_WORK_TARGET_SECS = 8 * 60 * 60;
+const OFFICE_BREAK_TARGET_SECS = 60 * 60;
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -212,11 +216,14 @@ interface DashboardProps {
 export default function Dashboard({ view, onLogout }: DashboardProps) {
     const {
         status, loading, actionLoading, error,
-        handleStart, handleBreak, handleStop,
-        todayWorked, todayBreakSecs: _todayBreakSecs, todayBreaksCount, todayIdleSecs,
-        expectedWorkSecs, expectedActiveSecs, maxBreaks: _maxBreaks,
-        workLocation,
+        handleStart, handleBreak, handleStop, handleStartOvertime,
+        todayWorked, todayBreakSecs, activeBreakStartTime, todayBreaksCount, todayIdleSecs,
+        expectedWorkSecs, expectedBreakSecs, expectedActiveSecs, maxBreaks,
+        breakReminderAfterSecs, breakReminderRepeatSecs,
+        isOvertimeActive, overtimeSecs, overtimeStatus, overtimeAccepted,
+        currentShiftId, workLocation,
     } = useTimer();
+    const { requestOvertimeConfirmation } = useOvertimePrompt();
 
     // Clock-in location modal
     const [showLocationModal, setShowLocationModal] = useState(false);
@@ -235,8 +242,254 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
     // App close warning modal
     const [showCloseWarning, setShowCloseWarning] = useState(false);
 
+    const fallbackOvertimePromptedShiftRef = useRef<string | null>(null);
+
+    // Break reminder modal
+    const [showBreakReminder, setShowBreakReminder] = useState(false);
+    const [nextBreakReminderAtSecs, setNextBreakReminderAtSecs] = useState<number | null>(null);
+    const trackedBreakStartRef = useRef<string | null>(null);
+    const statusRef = useRef(status);
+    const showBreakReminderRef = useRef(showBreakReminder);
+    const lastReminderTriggerAtRef = useRef(0);
+
+    const currentBreakSecs = status === 'on_break' && activeBreakStartTime
+        ? Math.max(0, Math.floor((Date.now() - new Date(activeBreakStartTime).getTime()) / 1000))
+        : 0;
+
+    const effectiveOfficeWorkTargetSecs = expectedWorkSecs > 0 ? expectedWorkSecs : OFFICE_WORK_TARGET_SECS;
+    const effectiveOfficeBreakTargetSecs = expectedBreakSecs > 0 ? expectedBreakSecs : OFFICE_BREAK_TARGET_SECS;
+    const breakLimitReached = status !== 'on_break' && todayBreaksCount >= maxBreaks;
+
+    useEffect(() => {
+        statusRef.current = status;
+    }, [status]);
+
+    useEffect(() => {
+        showBreakReminderRef.current = showBreakReminder;
+    }, [showBreakReminder]);
+
+    const showRendererBreakNotification = useCallback(async (breakSecs: number) => {
+        if (!('Notification' in window)) return false;
+
+        let permission = window.Notification.permission;
+        if (permission === 'default') {
+            permission = await window.Notification.requestPermission();
+        }
+
+        if (permission !== 'granted') {
+            console.warn('[BreakReminder] Renderer notification permission:', permission);
+            return false;
+        }
+
+        const iconUrl = new URL('icon.png', window.location.href).toString();
+        const notification = new window.Notification('You are still on break', {
+            body: `Your current break has been running for ${formatDuration(breakSecs)}.`,
+            icon: iconUrl,
+            silent: false,
+        });
+        notification.onclick = () => window.focus();
+        return true;
+    }, []);
+
+    const triggerBreakReminder = useCallback((breakSecs: number, notifyNative: boolean) => {
+        if (statusRef.current !== 'on_break') return;
+
+        const now = Date.now();
+        if (showBreakReminderRef.current && now - lastReminderTriggerAtRef.current < 1500) {
+            return;
+        }
+
+        lastReminderTriggerAtRef.current = now;
+        setShowBreakReminder(true);
+
+        const api = window.electronAPI;
+        api?.focusBreakReminder?.();
+        window.requestAnimationFrame(() => {
+            api?.focusBreakReminder?.();
+        });
+
+        if (notifyNative) {
+            api?.showBreakReminder?.(breakSecs, true);
+            void showRendererBreakNotification(breakSecs);
+        }
+    }, [showRendererBreakNotification]);
+
+    // Electron implementation: listen to events from main process
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api?.onShowBreakReminderModal) return;
+
+        console.log('[Dashboard] Registering show-break-reminder-modal listener');
+
+        api.onShowBreakReminderModal?.((secs) => {
+            console.log('[Dashboard] Received show-break-reminder-modal event from Electron, duration:', secs);
+            triggerBreakReminder(secs, false);
+        });
+
+        return () => {
+            console.log('[Dashboard] Cleaning up show-break-reminder-modal listener');
+            api.removeShowBreakReminderModal?.();
+        };
+    }, [triggerBreakReminder]);
+
+    // Renderer-owned reminder timer. This runs in Electron too, so the popup
+    // does not depend entirely on the main-process timeout chain.
+    useEffect(() => {
+        if (status !== 'on_break' || !activeBreakStartTime) {
+            trackedBreakStartRef.current = null;
+            setShowBreakReminder(false);
+            setNextBreakReminderAtSecs(null);
+            lastReminderTriggerAtRef.current = 0;
+            return;
+        }
+
+        if (trackedBreakStartRef.current !== activeBreakStartTime) {
+            trackedBreakStartRef.current = activeBreakStartTime;
+            setShowBreakReminder(false);
+            setNextBreakReminderAtSecs(breakReminderAfterSecs);
+        }
+    }, [status, activeBreakStartTime, breakReminderAfterSecs]);
+
+    useEffect(() => {
+        if (
+            status !== 'on_break' ||
+            !activeBreakStartTime ||
+            showBreakReminder ||
+            nextBreakReminderAtSecs === null
+        ) {
+            return;
+        }
+
+        if (currentBreakSecs >= nextBreakReminderAtSecs) {
+            triggerBreakReminder(currentBreakSecs, true);
+        }
+    }, [status, activeBreakStartTime, currentBreakSecs, nextBreakReminderAtSecs, showBreakReminder, triggerBreakReminder]);
+
+    const dismissBreakReminder = () => {
+        setShowBreakReminder(false);
+        setNextBreakReminderAtSecs(currentBreakSecs + breakReminderRepeatSecs);
+        window.electronAPI?.closeBreakReminderPopup?.();
+    };
+
+    const resumeFromBreakReminder = async () => {
+        setShowBreakReminder(false);
+        setNextBreakReminderAtSecs(null);
+        window.electronAPI?.closeBreakReminderPopup?.();
+        await handleBreak();
+    };
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api?.onBreakReminderDismiss || !api?.onBreakReminderResume) return;
+
+        api.onBreakReminderDismiss(() => {
+            dismissBreakReminder();
+        });
+        api.onBreakReminderResume(() => {
+            void resumeFromBreakReminder();
+        });
+
+        return () => {
+            api.removeBreakReminderActionListeners?.();
+        };
+    }, [dismissBreakReminder, resumeFromBreakReminder]);
+
+    const handleOvertimeDecision = useCallback(async (result: 'yes' | 'no') => {
+        if (result === 'no') {
+            return handleStop({ overtimeAccepted: false });
+        }
+
+        return handleStartOvertime();
+    }, [handleStop, handleStartOvertime]);
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api?.onOvertimePromptNo || !api?.onOvertimePromptYes) return;
+
+        api.onOvertimePromptNo(() => {
+            void handleOvertimeDecision('no');
+        });
+        api.onOvertimePromptYes(() => {
+            void handleOvertimeDecision('yes');
+        });
+
+        return () => {
+            api.removeOvertimePromptListeners?.();
+        };
+    }, [handleOvertimeDecision]);
+
+    useEffect(() => {
+        if (!currentShiftId) {
+            fallbackOvertimePromptedShiftRef.current = null;
+        }
+    }, [currentShiftId]);
+
+    useEffect(() => {
+        if (
+            (status !== 'working' && status !== 'on_break') ||
+            workLocation !== 'office' ||
+            !currentShiftId ||
+            isOvertimeActive ||
+            overtimeStatus === 'active' ||
+            typeof overtimeAccepted === 'boolean' ||
+            fallbackOvertimePromptedShiftRef.current === currentShiftId ||
+            todayWorked < effectiveOfficeWorkTargetSecs ||
+            todayBreakSecs < effectiveOfficeBreakTargetSecs
+        ) {
+            return;
+        }
+
+        fallbackOvertimePromptedShiftRef.current = currentShiftId;
+        setShowBreakReminder(false);
+        setNextBreakReminderAtSecs(null);
+        window.electronAPI?.closeBreakReminderPopup?.();
+        console.log('[Overtime] Requesting global prompt from renderer', {
+            status,
+            workLocation,
+            currentShiftId,
+            todayWorked,
+            todayBreakSecs,
+            workTargetSecs: effectiveOfficeWorkTargetSecs,
+            breakTargetSecs: effectiveOfficeBreakTargetSecs,
+        });
+
+        const promptedShiftId = currentShiftId;
+        void (async () => {
+            const api = window.electronAPI;
+            if (api?.showOvertimePrompt) {
+                api.showOvertimePrompt(effectiveOfficeWorkTargetSecs, effectiveOfficeBreakTargetSecs);
+                return;
+            }
+
+            await requestOvertimeConfirmation(handleOvertimeDecision);
+        })().catch(() => {
+            if (fallbackOvertimePromptedShiftRef.current === promptedShiftId) {
+                fallbackOvertimePromptedShiftRef.current = null;
+            }
+        });
+    }, [
+        status,
+        workLocation,
+        currentShiftId,
+        isOvertimeActive,
+        overtimeStatus,
+        overtimeAccepted,
+        todayWorked,
+        todayBreakSecs,
+        effectiveOfficeWorkTargetSecs,
+        effectiveOfficeBreakTargetSecs,
+        requestOvertimeConfirmation,
+        handleOvertimeDecision,
+    ]);
+
     /** Called when user clicks "Check Out" button */
     const handleCheckoutClick = () => {
+        if (isOvertimeActive) {
+            setShowWarning(false);
+            void handleStop();
+            return;
+        }
+
         const activeSecs = Math.max(0, todayWorked - todayIdleSecs);
         const workShortfall = Math.max(0, expectedWorkSecs - todayWorked);
         const activeShortfall = Math.max(0, expectedActiveSecs - activeSecs);
@@ -346,13 +599,13 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             <StatusBadge status={status} />
                         )}
 
-                        <div className={`timer-display ${status}`} id="timer-display">
-                            {formatDuration(todayWorked)}
+                        <div className={`timer-display ${isOvertimeActive ? 'overtime' : status}`} id="timer-display">
+                            {formatDuration(isOvertimeActive ? overtimeSecs : todayWorked)}
                         </div>
 
                         <div className="timer-sub">
                             {status === 'stopped' && 'Ready to work. Clock in when you start.'}
-                            {status === 'working' && 'Shift in progress. Stay productive!'}
+                            {status === 'working' && (isOvertimeActive ? 'OverTime in progress.' : 'Shift in progress. Stay productive!')}
                             {status === 'on_break' && "Break in progress. Relax!"}
                         </div>
 
@@ -382,13 +635,13 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                                 id="btn-break"
                                 className={`btn ${status === 'on_break' ? 'btn-primary' : 'btn-warning'}`}
                                 onClick={handleBreak}
-                                disabled={status === 'stopped' || actionLoading || (status !== 'on_break' && todayBreaksCount >= 10)}
+                                disabled={status === 'stopped' || actionLoading || breakLimitReached}
                                 style={{ whiteSpace: 'nowrap' }}
                             >
                                 {status === 'on_break' ? (
                                     <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>Resume</>
                                 ) : (
-                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>Break{todayBreaksCount >= 10 ? ' (Max)' : ''}</>
+                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>Break{breakLimitReached ? ' (Max)' : ''}</>
                                 )}
                             </button>
 

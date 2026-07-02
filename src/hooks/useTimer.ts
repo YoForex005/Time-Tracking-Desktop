@@ -17,7 +17,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-    getStatus, startShift, toggleBreak, stopShift, getHistory, sendHeartbeat,
+    getStatus, startShift, toggleBreak, stopShift, startOvertime, getHistory, sendHeartbeat,
     startIdleSession, endIdleSession, getTodayIdleSecs,
     subscribeToThresholdEvents, rolloverMidnight,
 } from '../api';
@@ -31,6 +31,14 @@ export interface HistoryShift {
     id: string;
     startTime: string;
     endTime: string | null;
+    regularEndTime?: string | null;
+    regularWorkSecs?: number | null;
+    regularBreakSecs?: number | null;
+    overtimeAccepted?: boolean | null;
+    overtimeDecisionAt?: string | null;
+    overtimeStartTime?: string | null;
+    overtimeEndTime?: string | null;
+    overtimeStatus?: 'none' | 'active' | 'completed' | string;
     checkoutType?: 'manual' | 'auto_shutdown' | 'midnight_rollover';
     checkoutReason?: string | null;
     graceAppliedSecs?: number;
@@ -61,7 +69,38 @@ declare global {
             onSleepBreakEnded: (cb: (ok: boolean) => void) => void;
             removeSleepListeners: () => void;
             // Shift status sync to main process
-            updateShiftStatus: (status: string) => void;
+            updateShiftStatus: (
+                status: string,
+                activeBreakStartTime: string | null,
+                breakReminderAfterSecs: number,
+                breakReminderRepeatSecs: number
+            ) => void;
+            // Break reminder modal
+            onShowBreakReminderModal?: (cb: (breakSecs: number) => void) => void;
+            showBreakReminder?: (breakSecs: number, focusWindow?: boolean) => void;
+            focusBreakReminder?: () => void;
+            closeBreakReminderPopup?: () => void;
+            focusMainWindow?: () => void;
+            onBreakReminderDismiss?: (cb: () => void) => void;
+            onBreakReminderResume?: (cb: () => void) => void;
+            removeBreakReminderActionListeners?: () => void;
+            showOvertimePrompt?: (workSecs: number, breakSecs: number) => void;
+            updateOvertimeStatus?: (payload: {
+                status: TimerStatus;
+                workLocation: string;
+                currentShiftId: string | null;
+                overtimeAccepted: boolean;
+                todayWorked: number;
+                todayBreakSecs: number;
+                workTargetSecs: number;
+                breakTargetSecs: number;
+            }) => void;
+            focusOvertimePrompt?: () => void;
+            closeOvertimePrompt?: () => void;
+            onOvertimePromptNo?: (cb: () => void) => void;
+            onOvertimePromptYes?: (cb: () => void) => void;
+            removeOvertimePromptListeners?: () => void;
+            removeShowBreakReminderModal?: () => void;
             // Tracker auth
             setTrackerAuthToken: (token: string) => void;
             clearTrackerAuthToken: () => void;
@@ -114,6 +153,19 @@ function calcTotalBreakSecsInRange(
     }, 0);
 }
 
+function calcWorkSecsUntil(shift: HistoryShift, endTime: string): number {
+    const shiftStartMs = new Date(shift.startTime).getTime();
+    const endMs = new Date(endTime).getTime();
+    if (!Number.isFinite(shiftStartMs) || !Number.isFinite(endMs)) return 0;
+
+    const cappedEndMs = Math.max(shiftStartMs, Math.min(endMs, Date.now()));
+    const elapsedSecs = Math.max(0, Math.floor((cappedEndMs - shiftStartMs) / 1000));
+    const breakSecs = calcTotalBreakSecsInRange(shift.breaks, shiftStartMs, cappedEndMs);
+    const adjustmentSecs = (shift.timeAdjustmentSecs ?? 0) + (shift.graceAppliedSecs ?? 0);
+
+    return Math.max(0, elapsedSecs - breakSecs + adjustmentSecs);
+}
+
 function getNextLocalMidnight(): Date {
     const next = new Date();
     next.setDate(next.getDate() + 1);
@@ -154,8 +206,11 @@ export function useTimer() {
     // Admin sets these in the admin portal. Desktop reads them every poll and
     // shows a checkout warning if not met.
     const [expectedWorkSecs, setExpectedWorkSecs] = useState(28800); // 8h default
+    const [expectedBreakSecs, setExpectedBreakSecs] = useState(3600); // 1h default
     const [expectedActiveSecs, setExpectedActiveSecs] = useState(25200); // 7h default
     const [maxBreaks, setMaxBreaks] = useState(3);     // admin-configurable break limit
+    const [breakReminderAfterSecs, setBreakReminderAfterSecs] = useState(1800);
+    const [breakReminderRepeatSecs, setBreakReminderRepeatSecs] = useState(300);
 
 
     // ── Idle state ────────────────────────────────────────────────────────────
@@ -205,8 +260,11 @@ export function useTimer() {
 
             // ── Keep work-time targets in sync ───────────────────────────────
             if (typeof data.expectedWorkSecs === 'number') setExpectedWorkSecs(data.expectedWorkSecs);
+            if (typeof data.expectedBreakSecs === 'number') setExpectedBreakSecs(data.expectedBreakSecs);
             if (typeof data.expectedActiveSecs === 'number') setExpectedActiveSecs(data.expectedActiveSecs);
             if (typeof data.maxBreaks === 'number') setMaxBreaks(data.maxBreaks);
+            if (typeof data.breakReminderAfterSecs === 'number') setBreakReminderAfterSecs(data.breakReminderAfterSecs);
+            if (typeof data.breakReminderRepeatSecs === 'number') setBreakReminderRepeatSecs(data.breakReminderRepeatSecs);
             if (
                 typeof data.screenshotIntervalSecs === 'number' &&
                 data.screenshotIntervalSecs !== lastScreenshotIntervalRef.current
@@ -407,15 +465,6 @@ export function useTimer() {
     }, [status, currentShift, idleSessionStartTime, fetchStatus, fetchHistory, fetchIdleSecs]);
 
 
-    // ── Shift status sync to main process ──────────────────────────────────────
-    // Keep main.js informed so it can guard the sleep break correctly.
-    // Main.js needs to know 'working' before suspend fires to call the API.
-    useEffect(() => {
-        const api = window.electronAPI;
-        if (!api || !('updateShiftStatus' in api)) return;
-        (api as unknown as { updateShiftStatus: (s: string) => void }).updateShiftStatus(status);
-    }, [status]);
-
     // ── Real-time idle threshold sync (SSE) ─────────────────────────────────
     // Subscribes to the backend SSE stream on mount.
     // When admin changes a user's idle threshold, the backend pushes an
@@ -594,14 +643,9 @@ export function useTimer() {
     void _historyWork;
     void _historyBreakSecs;
 
-    // Break count: use history as ground truth (status API may omit older breaks)
-    const breaksCountFromHistory = history
-        .filter(s => new Date(s.startTime).getTime() >= todayStart)
-        .reduce((acc, s) => acc + s.breaks.length, 0);
-
-    // Optimistic +1 for when user clicked "Take Break" but server hasn't yet responded
-    const hasOptimisticBreak = !!(currentShift?.breaks.some(b => b.id.startsWith('temp-')));
-    const todayBreaksCount = breaksCountFromHistory + (hasOptimisticBreak ? 1 : 0);
+    // Break limit is per active shift. The status API returns all breaks for the
+    // current shift, and optimistic break starts are added to this same array.
+    const todayBreaksCount = currentShift?.breaks.length ?? 0;
 
 
     // ── Active shift contribution (recalculated every second via tick) ──────────
@@ -628,6 +672,17 @@ export function useTimer() {
     // One check-in → check-out = one shift. Backend history is unaffected.
     const todayWorked = activeWork;
     const todayBreakSecs = activeBreakSecs;
+    const activeBreak = currentShift?.breaks.find(b => !b.endTime) ?? null;
+    const isOvertimeActive =
+        status !== 'stopped' &&
+        currentShift?.overtimeStatus === 'active' &&
+        !!currentShift.overtimeStartTime;
+    const overtimeBaseWorkedSecs = isOvertimeActive && currentShift?.overtimeStartTime
+        ? calcWorkSecsUntil(currentShift, currentShift.overtimeStartTime)
+        : null;
+    const overtimeSecs = overtimeBaseWorkedSecs !== null
+        ? Math.max(0, todayWorked - overtimeBaseWorkedSecs)
+        : 0;
 
     // ── Idle time: combine closed sessions (from backend) + live active session ──
     // `closedIdleSecs` = sum of all finished idle sessions fetched from backend.
@@ -709,23 +764,68 @@ export function useTimer() {
         }
     };
 
-    const handleStop = async () => {
+    const handleStop = async (options: { overtimeAccepted?: boolean } = {}): Promise<boolean> => {
         setError('');
         setActionLoading(true);
         try {
             // Close any open idle session before stopping the shift
             await endIdleSession().catch(() => { /* Already closed or no shift — safe to ignore */ });
             setIdleSessionStartTime(null); // clear local idle timer
-            await stopShift();
+            await stopShift(options);
             await fetchHistory();
             await fetchStatus();
             await fetchIdleSecs();
+            return true;
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : 'Error');
+            return false;
         } finally {
             setActionLoading(false);
         }
     };
+
+    const handleStartOvertime = async (): Promise<boolean> => {
+        setError('');
+        setActionLoading(true);
+        try {
+            await endIdleSession().catch(() => { /* Already closed or no shift - safe to ignore */ });
+            setIdleSessionStartTime(null);
+            await startOvertime();
+            await fetchStatus();
+            await fetchHistory();
+            await fetchIdleSecs();
+            return true;
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Error');
+            await fetchStatus();
+            await fetchHistory();
+            return false;
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    // ── Shift status sync to main process ──────────────────────────────────────
+    // Keep main.js informed so it can guard the sleep break and schedule break reminders correctly.
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api || !('updateShiftStatus' in api)) return;
+
+        const activeBreakStartTime = status === 'on_break' ? activeBreak?.startTime ?? null : null;
+        console.log('[useTimer] Syncing shift status to Electron:', {
+            status,
+            activeBreakStartTime,
+            breakReminderAfterSecs,
+            breakReminderRepeatSecs
+        });
+
+        (api as any).updateShiftStatus(
+            status,
+            activeBreakStartTime,
+            breakReminderAfterSecs,
+            breakReminderRepeatSecs
+        );
+    }, [status, activeBreak?.startTime, breakReminderAfterSecs, breakReminderRepeatSecs]);
 
     // Suppress unused variable warning — tick is only used to trigger re-renders
     void tick;
@@ -740,13 +840,25 @@ export function useTimer() {
         handleStart,
         handleBreak,
         handleStop,
+        handleStartOvertime,
         todayWorked,
         todayBreakSecs,
+        isOvertimeActive,
+        overtimeSecs,
+        overtimeStartTime: currentShift?.overtimeStartTime ?? null,
+        overtimeStatus: currentShift?.overtimeStatus ?? 'none',
+        overtimeAccepted: currentShift?.overtimeAccepted ?? null,
+        overtimeDecisionAt: currentShift?.overtimeDecisionAt ?? null,
+        activeBreakStartTime: status === 'on_break' ? activeBreak?.startTime ?? null : null,
         todayBreaksCount,
         todayIdleSecs,        // real-time idle seconds (increments every second)
         expectedWorkSecs,     // org-wide expected total shift length
+        expectedBreakSecs,    // org-wide required break time before overtime prompt
         expectedActiveSecs,   // org-wide expected active (non-idle) time
         maxBreaks,            // org-wide max breaks per shift (admin-configurable)
+        breakReminderAfterSecs,
+        breakReminderRepeatSecs,
+        currentShiftId: currentShift?.id ?? null,
         workLocation: currentShift?.workLocation ?? 'office',
     };
 }

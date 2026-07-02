@@ -181,6 +181,8 @@ body::after {
   flex: 1;
   overflow-y: auto;
   padding: 16px 24px;
+  width: min(100%, 980px);
+  margin: 0 auto;
   /* Transparent so the body gradient shows through */
   background: transparent;
   scrollbar-width: none;
@@ -304,6 +306,11 @@ body::after {
   text-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
 }
 
+.timer-display.overtime {
+  color: #2563eb;
+  text-shadow: 0 4px 16px rgba(37, 99, 235, 0.28);
+}
+
 .timer-display.stopped {
   color: var(--text-primary);
 }
@@ -323,6 +330,25 @@ body::after {
   justify-content: center;
   flex-wrap: nowrap;
   width: 100%;
+}
+
+.timer-actions .btn {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .main {
+    width: 100%;
+    padding: 12px 16px 20px;
+  }
+
+  .timer-card {
+    padding: 24px;
+  }
+
+  .timer-actions {
+    flex-direction: column;
+  }
 }
 
 /* ─── Buttons ──────────────────────────────────────────── */
@@ -621,11 +647,147 @@ body::after {
   border-radius: 2px;
 }
 
+/* --- Global Overtime Prompt ----------------------------- */
+#overtime-modal-portal {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+}
+
+body.overtime-modal-open {
+  overflow: hidden !important;
+}
+
+.overtime-modal-root {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  min-width: 100vw;
+  max-width: none !important;
+  height: 100vh !important;
+  min-height: 100vh;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  isolation: isolate;
+  overflow: hidden;
+  pointer-events: auto;
+  animation: fadeIn 0.12s ease;
+}
+
+.overtime-modal {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 380px);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text-primary);
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.34);
+  padding: 28px;
+  text-align: center;
+  animation: slideUp 0.18s ease;
+}
+
+.overtime-modal h2 {
+  margin: 0 0 24px;
+  font-size: 22px;
+  line-height: 1.28;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.overtime-modal__error {
+  margin: -10px 0 18px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.overtime-modal__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.overtime-modal__button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.overtime-modal__button:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.overtime-modal__button:active {
+  transform: scale(0.98);
+}
+
+.overtime-modal__button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+}
+
+.overtime-modal__button--no {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.overtime-modal__button--no:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.overtime-modal__button--yes {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.24);
+}
+
+.overtime-modal__button--yes:hover:not(:disabled) {
+  background: linear-gradient(135deg, #22c55e, #059669);
+  box-shadow: 0 14px 28px rgba(16, 185, 129, 0.3);
+}
+
+@media (max-width: 420px) {
+  .overtime-modal-root {
+    padding: 16px;
+  }
+
+  .overtime-modal {
+    padding: 24px;
+  }
+}
+
 /* ─── Checkout Warning Modal ──────────────────────────── */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 999;
+  z-index: 30000;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
   display: flex;

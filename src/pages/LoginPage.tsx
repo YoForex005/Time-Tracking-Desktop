@@ -29,6 +29,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     const deviceCode = useRef<string>(crypto.randomUUID());
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const sessionConsumedRef = useRef(false);
+    const loginOpenInProgressRef = useRef(false);
 
     const [waiting, setWaiting] = useState(false);
     const [expired, setExpired] = useState(false);
@@ -65,6 +66,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             } | undefined;
             api?.setIdleThreshold?.(threshold);
             api?.setTrackerAuthToken?.(data.token);
+            loginOpenInProgressRef.current = false;
 
             onLogin({ id: data.id, name: data.name, email: data.email }, data.token);
         },
@@ -81,6 +83,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                     clearPolling();
                     setExpired(true);
                     setWaiting(false);
+                    loginOpenInProgressRef.current = false;
                     return;
                 }
                 if (!res.ok) return;
@@ -122,6 +125,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }, [waiting, expired, pollDesktopSession]);
 
     const handleOpenBrowser = () => {
+        if (waiting || loginOpenInProgressRef.current) return;
+        loginOpenInProgressRef.current = true;
+
         const code = deviceCode.current;
         const api = window.electronAPI as { openLogin?: (deviceCode: string) => void } | undefined;
         if (api?.openLogin) {
@@ -144,6 +150,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         clearPolling();
         deviceCode.current = crypto.randomUUID();
         sessionConsumedRef.current = false;
+        loginOpenInProgressRef.current = false;
         setExpired(false);
         setWaiting(false);
     };
@@ -203,6 +210,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                             }}
                             onClick={() => {
                                 clearPolling();
+                                loginOpenInProgressRef.current = false;
                                 setWaiting(false);
                             }}
                         >

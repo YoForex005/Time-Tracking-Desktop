@@ -18,6 +18,56 @@ contextBridge.exposeInMainWorld('electronAPI', {
     minimize: () => ipcRenderer.send('window-minimize'),
     maximize: () => ipcRenderer.send('window-maximize'),
     close: () => ipcRenderer.send('window-close'),
+    onShowBreakReminderModal: (callback) => {
+        ipcRenderer.on('show-break-reminder-modal', (_event, breakSecs) => callback(breakSecs));
+    },
+    showBreakReminder: (breakSecs, focusWindow) => {
+        ipcRenderer.send('show-break-reminder', breakSecs, focusWindow);
+    },
+    focusBreakReminder: () => {
+        ipcRenderer.send('focus-break-reminder');
+    },
+    closeBreakReminderPopup: () => {
+        ipcRenderer.send('close-break-reminder-popup');
+    },
+    focusMainWindow: () => {
+        ipcRenderer.send('focus-main-window');
+    },
+    onBreakReminderDismiss: (callback) => {
+        ipcRenderer.on('break-reminder-dismiss', () => callback());
+    },
+    onBreakReminderResume: (callback) => {
+        ipcRenderer.on('break-reminder-resume', () => callback());
+    },
+    removeBreakReminderActionListeners: () => {
+        ipcRenderer.removeAllListeners('break-reminder-dismiss');
+        ipcRenderer.removeAllListeners('break-reminder-resume');
+    },
+    showOvertimePrompt: (workSecs, breakSecs) => {
+        ipcRenderer.send('show-overtime-prompt', workSecs, breakSecs);
+    },
+    updateOvertimeStatus: (payload) => {
+        ipcRenderer.send('update-overtime-status', payload);
+    },
+    focusOvertimePrompt: () => {
+        ipcRenderer.send('focus-overtime-prompt');
+    },
+    closeOvertimePrompt: () => {
+        ipcRenderer.send('close-overtime-prompt');
+    },
+    onOvertimePromptNo: (callback) => {
+        ipcRenderer.on('overtime-prompt-no', () => callback());
+    },
+    onOvertimePromptYes: (callback) => {
+        ipcRenderer.on('overtime-prompt-yes', () => callback());
+    },
+    removeOvertimePromptListeners: () => {
+        ipcRenderer.removeAllListeners('overtime-prompt-no');
+        ipcRenderer.removeAllListeners('overtime-prompt-yes');
+    },
+    removeShowBreakReminderModal: () => {
+        ipcRenderer.removeAllListeners('show-break-reminder-modal');
+    },
 
     // ── Idle Detection ───────────────────────────────────────────────────────
     // The main process polls system idle time every 10 seconds and sends these
@@ -104,7 +154,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
      * Sends current shift status to main process so it can guard the sleep break.
      * Call on every status change (working / on_break / stopped).
      */
-    updateShiftStatus: (status) => ipcRenderer.send('update-shift-status', status),
+    updateShiftStatus: (status, activeBreakStartTime, breakReminderAfterSecs, breakReminderRepeatSecs) =>
+        ipcRenderer.send('update-shift-status', status, activeBreakStartTime, breakReminderAfterSecs, breakReminderRepeatSecs),
 
     // ── App Tracking (Silent) ────────────────────────────────────────────────
     onAppTrackerUpdate: (callback) => {

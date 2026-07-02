@@ -30,6 +30,22 @@ async function handleResponse(res: Response) {
     return data;
 }
 
+function getNetworkError(error: unknown): Error {
+    if (error instanceof TypeError) {
+        return new Error(`Backend is not reachable at ${API_BASE}. Make sure the backend server is running.`);
+    }
+
+    return error instanceof Error ? error : new Error('Network request failed');
+}
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    try {
+        return await fetch(input, init);
+    } catch (error) {
+        throw getNetworkError(error);
+    }
+}
+
 function getToken(): string | null {
     return localStorage.getItem('wf_token');
 }
@@ -73,7 +89,7 @@ function clientTimestampQuery(date = new Date()): string {
 
 
 export async function login(email: string, password: string) {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    const res = await apiFetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -91,13 +107,21 @@ export async function login(email: string, password: string) {
 }
 
 export async function getStatus() {
-    const res = await fetch(`${API_BASE}/time/status`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/time/status`, { headers: authHeaders() });
     const data = await handleResponse(res);
     return data as {
         status: 'stopped' | 'working' | 'on_break';
         shift: {
             id: string;
             startTime: string;
+            regularEndTime?: string | null;
+            regularWorkSecs?: number | null;
+            regularBreakSecs?: number | null;
+            overtimeAccepted?: boolean | null;
+            overtimeDecisionAt?: string | null;
+            overtimeStartTime?: string | null;
+            overtimeEndTime?: string | null;
+            overtimeStatus?: 'none' | 'active' | 'completed' | string;
             breaks: Array<{ id: string; startTime: string; endTime: string | null }>;
             workLocation?: string;
             graceAppliedSecs?: number;
@@ -105,9 +129,12 @@ export async function getStatus() {
         } | null;
         idleThresholdSecs: number;
         expectedWorkSecs: number;
+        expectedBreakSecs: number;
         expectedActiveSecs: number;
         maxBreaks: number;
         screenshotIntervalSecs: number;
+        breakReminderAfterSecs?: number;
+        breakReminderRepeatSecs?: number;
         wfhCaptureIntervalMs?: number;
         wfhScreenIdleThresholdSecs?: number;
         wfhThumbWidth?: number;
@@ -116,7 +143,7 @@ export async function getStatus() {
 }
 
 export async function startShift(workLocation: 'wfh' | 'office') {
-    const res = await fetch(`${API_BASE}/time/start`, {
+    const res = await apiFetch(`${API_BASE}/time/start`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ work_location: workLocation, ...clientTimestampPayload() }),
@@ -125,7 +152,7 @@ export async function startShift(workLocation: 'wfh' | 'office') {
 }
 
 export async function toggleBreak() {
-    const res = await fetch(`${API_BASE}/time/break`, {
+    const res = await apiFetch(`${API_BASE}/time/break`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(clientTimestampPayload()),
@@ -133,8 +160,22 @@ export async function toggleBreak() {
     return handleResponse(res);
 }
 
-export async function stopShift() {
-    const res = await fetch(`${API_BASE}/time/stop`, {
+export async function stopShift(options: { overtimeAccepted?: boolean } = {}) {
+    const res = await apiFetch(`${API_BASE}/time/stop`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+            ...clientTimestampPayload(),
+            ...(typeof options.overtimeAccepted === 'boolean'
+                ? { overtimeAccepted: options.overtimeAccepted, overtime_accepted: options.overtimeAccepted }
+                : {}),
+        }),
+    });
+    return handleResponse(res);
+}
+
+export async function startOvertime() {
+    const res = await apiFetch(`${API_BASE}/time/overtime/start`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(clientTimestampPayload()),
@@ -143,7 +184,7 @@ export async function stopShift() {
 }
 
 export async function sendHeartbeat() {
-    const res = await fetch(`${API_BASE}/time/heartbeat`, {
+    const res = await apiFetch(`${API_BASE}/time/heartbeat`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(clientTimestampPayload()),
@@ -153,7 +194,7 @@ export async function sendHeartbeat() {
 
 export async function rolloverMidnight(options: { rolloverAt?: Date; continueIdle?: boolean } = {}) {
     const rolloverAt = options.rolloverAt ?? new Date();
-    const res = await fetch(`${API_BASE}/time/rollover-midnight`, {
+    const res = await apiFetch(`${API_BASE}/time/rollover-midnight`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -166,12 +207,20 @@ export async function rolloverMidnight(options: { rolloverAt?: Date; continueIdl
 }
 
 export async function getHistory() {
-    const res = await fetch(`${API_BASE}/time/history`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/time/history`, { headers: authHeaders() });
     const data = await handleResponse(res);
     return data.shifts as Array<{
         id: string;
         startTime: string;
         endTime: string | null;
+        regularEndTime?: string | null;
+        regularWorkSecs?: number | null;
+        regularBreakSecs?: number | null;
+        overtimeAccepted?: boolean | null;
+        overtimeDecisionAt?: string | null;
+        overtimeStartTime?: string | null;
+        overtimeEndTime?: string | null;
+        overtimeStatus?: 'none' | 'active' | 'completed' | string;
         checkoutType?: 'manual' | 'auto_shutdown' | 'midnight_rollover';
         checkoutReason?: string | null;
         graceAppliedSecs?: number;
@@ -192,7 +241,7 @@ export async function getHistory() {
  *                    (i.e., 60 seconds before this call is made).
  */
 export async function startIdleSession(startTime: string) {
-    const res = await fetch(`${API_BASE}/time/idle/start`, {
+    const res = await apiFetch(`${API_BASE}/time/idle/start`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ startTime, ...clientTimestampPayload() }),
@@ -203,7 +252,7 @@ export async function startIdleSession(startTime: string) {
 }
 
 export async function endIdleSession() {
-    const res = await fetch(`${API_BASE}/time/idle/end`, {
+    const res = await apiFetch(`${API_BASE}/time/idle/end`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify(clientTimestampPayload()),
@@ -212,7 +261,7 @@ export async function endIdleSession() {
 }
 
 export async function getTodayIdleSecs(): Promise<number> {
-    const res = await fetch(`${API_BASE}/time/idle/today?${clientTimestampQuery()}`, { headers: authHeaders() });
+    const res = await apiFetch(`${API_BASE}/time/idle/today?${clientTimestampQuery()}`, { headers: authHeaders() });
     const data = await handleResponse(res);
     return (data as { totalIdleSecs: number }).totalIdleSecs;
 }
