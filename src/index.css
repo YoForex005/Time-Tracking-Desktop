@@ -326,13 +326,16 @@ body::after {
 
 .timer-actions {
   display: flex;
-  gap: 8px;
-  justify-content: center;
+  flex-direction: row;
   flex-wrap: nowrap;
+  justify-content: center;
+  gap: 10px;
   width: 100%;
 }
 
 .timer-actions .btn {
+  flex: 1 1 0;
+  width: auto;
   min-width: 0;
 }
 
@@ -347,7 +350,14 @@ body::after {
   }
 
   .timer-actions {
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .timer-actions .btn {
+    padding-inline: 8px;
+    font-size: 11px;
   }
 }
 
@@ -631,6 +641,22 @@ body::after {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Keep the three tracker action buttons in one horizontal flex row. */
+.timer-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.timer-actions .btn {
+  flex: 1 1 0 !important;
+  min-width: 0;
 }
 
 /* ─── Scrollbar ────────────────────────────────────────── */
