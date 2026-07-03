@@ -1,7 +1,9 @@
 const axios = require('axios');
 const os = require('os');
 
-const API_BASE = process.env.API_BASE || (process.env.NODE_ENV === 'development' ? 'http://localhost:3005/api' : 'https://hrmsbackend.yoforex.net/api');
+const API_BASE = process.env.NODE_ENV === 'development'
+    ? (process.env.API_BASE || 'http://localhost:3005/api')
+    : 'https://hrmsbackend.yoforex.net/api';
 
 function getDefaultDeviceId() {
     let username = 'unknown-user';
