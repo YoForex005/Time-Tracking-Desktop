@@ -18,6 +18,7 @@
 process.noDeprecation = true; // Hides non-critical node warnings (like url.parse)
 
 const { app, BrowserWindow, ipcMain, powerMonitor, shell, Notification, screen } = require('electron');
+const Sentry = require('@sentry/electron/main');
 const { autoUpdater } = require('electron-updater');
 const axios = require('axios');
 const path = require('path');
@@ -58,6 +59,21 @@ function loadLocalEnv() {
 loadLocalEnv();
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+const SENTRY_DSN = process.env.SENTRY_DSN ||
+    'https://653631ed6a95f44ad902d3c336b3df16@o4511568602464256.ingest.us.sentry.io/4511688371863552';
+
+Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: isDev ? 'development' : 'production',
+    release: `workfolio-desktop@${app.getVersion()}`,
+});
+
+if (process.env.SENTRY_TEST_CRASH === '1') {
+    const delayMs = Number(process.env.SENTRY_TEST_CRASH_DELAY_MS || 3000);
+    setTimeout(() => {
+        throw new Error('Sentry test crash from YO HRMX Electron main process');
+    }, Number.isFinite(delayMs) && delayMs > 0 ? delayMs : 3000);
+}
 
 // Set the app name explicitly for the taskbar and OS integration
 app.setName('YO HRMX');
