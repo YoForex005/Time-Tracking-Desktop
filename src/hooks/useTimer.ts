@@ -153,19 +153,6 @@ function calcTotalBreakSecsInRange(
     }, 0);
 }
 
-function calcWorkSecsUntil(shift: HistoryShift, endTime: string): number {
-    const shiftStartMs = new Date(shift.startTime).getTime();
-    const endMs = new Date(endTime).getTime();
-    if (!Number.isFinite(shiftStartMs) || !Number.isFinite(endMs)) return 0;
-
-    const cappedEndMs = Math.max(shiftStartMs, Math.min(endMs, Date.now()));
-    const elapsedSecs = Math.max(0, Math.floor((cappedEndMs - shiftStartMs) / 1000));
-    const breakSecs = calcTotalBreakSecsInRange(shift.breaks, shiftStartMs, cappedEndMs);
-    const adjustmentSecs = (shift.timeAdjustmentSecs ?? 0) + (shift.graceAppliedSecs ?? 0);
-
-    return Math.max(0, elapsedSecs - breakSecs + adjustmentSecs);
-}
-
 function getNextLocalMidnight(): Date {
     const next = new Date();
     next.setDate(next.getDate() + 1);
@@ -677,11 +664,11 @@ export function useTimer() {
         status !== 'stopped' &&
         currentShift?.overtimeStatus === 'active' &&
         !!currentShift.overtimeStartTime;
-    const overtimeBaseWorkedSecs = isOvertimeActive && currentShift?.overtimeStartTime
-        ? calcWorkSecsUntil(currentShift, currentShift.overtimeStartTime)
-        : null;
-    const overtimeSecs = overtimeBaseWorkedSecs !== null
-        ? Math.max(0, todayWorked - overtimeBaseWorkedSecs)
+    // Match dashboard OT attribution: once OT is active, show work beyond the
+    // expected work target (not time since the user clicked Yes). Waiting on the
+    // OT popup is included so the timer and dashboard stay in sync.
+    const overtimeSecs = isOvertimeActive
+        ? Math.max(0, todayWorked - expectedWorkSecs)
         : 0;
 
     // ── Idle time: combine closed sessions (from backend) + live active session ──
