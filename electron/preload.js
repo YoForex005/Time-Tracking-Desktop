@@ -196,6 +196,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onOtaStatus: (callback) => {
         ipcRenderer.on('ota-status', (_event, status) => callback(status));
     },
+    /**
+     * Fired when an update check ends without a result to report — currently
+     * only on a suppressed error. Lets the renderer retire the transient
+     * "checking for updates" label instead of leaving it displayed.
+     */
+    onOtaCheckFinished: (callback) => {
+        ipcRenderer.on('ota-check-finished', () => callback());
+    },
     onUpdateReady: (callback) => {
         ipcRenderer.on('ota-update-ready', (_event, version) => callback(version));
     },

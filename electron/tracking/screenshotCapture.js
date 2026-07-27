@@ -1,151 +1,152 @@
-const { execFile } = require('child_process');
-const { readFile, unlink } = require('fs/promises');
+/**
+ * screenshotCapture.js — Full-screen capture of the monitor under the cursor
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Uses Electron's desktopCapturer on every platform.
+ *
+ * Previously Windows shelled out to PowerShell (System.Windows.Forms +
+ * Graphics.CopyFromScreen). That process is DPI-unaware, so Screen.Bounds
+ * reported logical (scaled) coordinates while CopyFromScreen read physical
+ * pixels — on any display not set to 100% scaling the result was a top-left
+ * crop of the desktop, which looks like a zoomed screenshot. macOS and Linux
+ * additionally captured the main/primary display rather than the one the user
+ * was actually working on.
+ *
+ * Electron is DPI-aware, so a single implementation fixes all of the above.
+ * Note that Display.bounds is expressed in DIP (device-independent pixels);
+ * multiplying by scaleFactor is what yields true native resolution.
+ */
 
-const PS_CAPTURE_SCRIPT = `
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+const { desktopCapturer, screen, systemPreferences } = require('electron');
 
-$cursorPoint = [System.Windows.Forms.Cursor]::Position
-$screen = [System.Windows.Forms.Screen]::FromPoint($cursorPoint)
-$bounds = $screen.Bounds
+// Longest edge permitted in a capture. 1080p, 1440p and 4K pass through
+// untouched; anything larger is scaled down proportionally — the whole screen
+// is always present, never cropped. This keeps the base64 upload inside the
+// backend's 25 MB JSON body limit and 20 MB decoded-image limit.
+const MAX_CAPTURE_EDGE_PX = 3840;
 
-$bitmap = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
-$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size)
+// Mirrors the timeout the old execFile() call carried. Without it a wedged
+// capture would leave the scheduler's tickInFlight latched and silently stop
+// all future screenshots for that session.
+const CAPTURE_TIMEOUT_MS = 15000;
 
-$tmpFile = [System.IO.Path]::GetTempFileName()
-$pngPath = [System.IO.Path]::ChangeExtension($tmpFile, 'png')
-if (Test-Path $tmpFile) { Remove-Item $tmpFile -Force }
-
-$bitmap.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
-$graphics.Dispose()
-$bitmap.Dispose()
-
-[PSCustomObject]@{
-    path = $pngPath
-    width = $bounds.Width
-    height = $bounds.Height
-    x = $bounds.X
-    y = $bounds.Y
-} | ConvertTo-Json -Compress
-`;
-
-function executePowerShell(script) {
-    return new Promise((resolve, reject) => {
-        execFile(
-            'powershell.exe',
-            ['-NoProfile', '-NonInteractive', '-STA', '-Command', script],
-            { timeout: 15000, windowsHide: true, maxBuffer: 1024 * 1024 * 8 },
-            (err, stdout, stderr) => {
-                if (err) {
-                    reject(new Error(stderr && String(stderr).trim() ? String(stderr).trim() : err.message));
-                    return;
-                }
-                resolve(String(stdout || '').trim());
-            }
-        );
+function withTimeout(promise, ms, label) {
+    let timer = null;
+    const timeout = new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+        if (timer) clearTimeout(timer);
     });
 }
 
+function fitWithinMaxEdge(width, height) {
+    const longest = Math.max(width, height);
+    if (longest <= MAX_CAPTURE_EDGE_PX) return { width, height };
+
+    const ratio = MAX_CAPTURE_EDGE_PX / longest;
+    return {
+        width: Math.max(1, Math.round(width * ratio)),
+        height: Math.max(1, Math.round(height * ratio)),
+    };
+}
+
+/**
+ * macOS gates screen capture behind TCC. Without this check a denied
+ * permission surfaces as a black or empty frame rather than an actionable
+ * error, which is very hard to diagnose from the server side.
+ */
+function assertScreenRecordingPermission() {
+    if (process.platform !== 'darwin') return;
+
+    const status = systemPreferences.getMediaAccessStatus('screen');
+    if (status !== 'granted') {
+        throw new Error(
+            `Screen Recording permission is '${status}'. Grant it under ` +
+            'System Settings > Privacy & Security > Screen Recording.'
+        );
+    }
+}
+
+/** The display the user is actually working on, not the primary one. */
+function getTargetDisplay() {
+    const cursorPoint = screen.getCursorScreenPoint();
+    return screen.getDisplayNearestPoint(cursorPoint);
+}
+
+function pickSourceForDisplay(sources, display) {
+    // source.display_id is a string; Display.id is a number.
+    const targetId = String(display.id);
+    const match = sources.find((source) => String(source.display_id) === targetId);
+    if (match) return match;
+
+    // Some Linux/Wayland sessions report an empty display_id. Fall back to the
+    // display's ordinal position, then to whatever screen is available.
+    const index = screen.getAllDisplays().findIndex((item) => item.id === display.id);
+    return sources[index] ?? sources[0];
+}
+
 async function captureCurrentMonitorPng() {
-    if (process.platform === 'darwin') {
-        const { execFile } = require('child_process');
-        const path = require('path');
-        const os = require('os');
-        const fs = require('fs/promises');
-        
-        const timestamp = Date.now();
-        const tmpPath = path.join(os.tmpdir(), `wf_shot_${timestamp}.png`);
-        
-        return new Promise((resolve, reject) => {
-            // -x = silent, -C = cursor, -m = main monitor ONLY (prevents filename ' 1' multi-monitor bug)
-            execFile('screencapture', ['-x', '-C', '-m', tmpPath], async (err, stdout, stderr) => {
-                if (err) {
-                    return reject(new Error('macOS screenshot failed: ' + (stderr || err.message)));
-                }
-                try {
-                    // Give it a solid 500ms for macOS to finish physically writing to the SSD
-                    await new Promise(r => setTimeout(r, 500));
-                    let imageBuffer;
-                    try {
-                        imageBuffer = await fs.readFile(tmpPath);
-                    } catch (readErr) {
-                        // Multi-monitor fallback just in case -m failed to stop numbering on older macOS
-                        try {
-                            const fallbackPath = path.join(os.tmpdir(), `wf_shot_${timestamp} 1.png`);
-                            imageBuffer = await fs.readFile(fallbackPath);
-                            await fs.unlink(fallbackPath).catch(() => {});
-                        } catch (fallbackErr) {
-                            throw readErr; // throw original
-                        }
-                    }
-                    await fs.unlink(tmpPath).catch(() => {});
-                    resolve({
-                        imageBuffer,
-                        display: { width: 0, height: 0, x: 0, y: 0 }
-                    });
-                } catch (e) {
-                    reject(new Error('Failed to read mac screenshot: ' + e.message));
-                }
-            });
-        });
-    }
-    if (process.platform === 'linux') {
-        const { desktopCapturer, screen } = require('electron');
-        try {
-            const primaryDisplay = screen.getPrimaryDisplay();
-            const { width, height } = primaryDisplay.bounds;
-            const sources = await desktopCapturer.getSources({
-                types: ['screen'],
-                thumbnailSize: { width, height },
-            });
-            if (!sources || sources.length === 0) {
-                throw new Error('No screen sources found');
-            }
-            const imageBuffer = sources[0].thumbnail.toPNG();
-            return {
-                imageBuffer,
-                display: { width, height, x: 0, y: 0 }
-            };
-        } catch (e) {
-            throw new Error('Linux screenshot via desktopCapturer failed: ' + e.message);
-        }
+    assertScreenRecordingPermission();
+
+    const display = getTargetDisplay();
+    const scaleFactor = display.scaleFactor || 1;
+    const bounds = display.bounds;
+
+    // bounds is DIP — scale up to physical pixels so scaled displays are not
+    // captured at reduced resolution.
+    const nativeWidth = Math.max(1, Math.round(bounds.width * scaleFactor));
+    const nativeHeight = Math.max(1, Math.round(bounds.height * scaleFactor));
+    const requested = fitWithinMaxEdge(nativeWidth, nativeHeight);
+
+    const sources = await withTimeout(
+        desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: requested,
+            fetchWindowIcons: false,
+        }),
+        CAPTURE_TIMEOUT_MS,
+        'Screen capture'
+    );
+
+    if (!sources || sources.length === 0) {
+        throw new Error('No screen sources available for capture');
     }
 
-    const raw = await executePowerShell(PS_CAPTURE_SCRIPT);
-    if (!raw) {
-        throw new Error('Screenshot capture returned empty output');
+    const source = pickSourceForDisplay(sources, display);
+    if (!source || !source.thumbnail || source.thumbnail.isEmpty()) {
+        throw new Error('Screen capture returned an empty frame');
     }
 
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    } catch (err) {
-        throw new Error(`Screenshot metadata parse failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    const imageBuffer = source.thumbnail.toPNG();
+    if (!imageBuffer || imageBuffer.length === 0) {
+        throw new Error('Screen capture produced an empty PNG buffer');
     }
 
-    const filePath = parsed?.path;
-    if (!filePath || typeof filePath !== 'string') {
-        throw new Error('Screenshot capture metadata missing output path');
-    }
+    // desktopCapturer preserves aspect ratio and may land a pixel off the
+    // requested size, so report what was actually produced.
+    const size = source.thumbnail.getSize();
 
-    try {
-        const imageBuffer = await readFile(filePath);
-        return {
-            imageBuffer,
-            display: {
-                width: Number(parsed.width) || 0,
-                height: Number(parsed.height) || 0,
-                x: Number(parsed.x) || 0,
-                y: Number(parsed.y) || 0,
-            },
-        };
-    } finally {
-        await unlink(filePath).catch(() => {});
-    }
+    return {
+        imageBuffer,
+        display: {
+            // Physical pixel dimensions of the image being uploaded.
+            width: size.width,
+            height: size.height,
+            x: bounds.x,
+            y: bounds.y,
+            // Diagnostics — surfaced in Screenshot.displayMeta so any future
+            // scaling mismatch is visible directly in the database.
+            scaleFactor,
+            displayId: String(display.id),
+            dipWidth: bounds.width,
+            dipHeight: bounds.height,
+            nativeWidth,
+            nativeHeight,
+            downscaled: size.width !== nativeWidth || size.height !== nativeHeight,
+        },
+    };
 }
 
 module.exports = {
     captureCurrentMonitorPng,
 };
-

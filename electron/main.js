@@ -1514,6 +1514,12 @@ function createWindow() {
 
     autoUpdater.on('error', (err) => {
         console.error(`[OTA] Update error (suppressed in UI): ${err.message}`);
+        // The error text stays out of the UI, but the renderer still needs to
+        // know the check ended — otherwise the transient "checking for
+        // updates" label has nothing to supersede it and stays on screen.
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ota-check-finished');
+        }
     });
 
     autoUpdater.on('download-progress', (progressObj) => {

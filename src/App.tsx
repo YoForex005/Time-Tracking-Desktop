@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './index.css';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
@@ -29,6 +29,14 @@ function getSavedUser(): User | null {
     }
 }
 
+// Longest the "checking for update..." label may stay up without the main
+// process reporting an outcome. A check normally resolves in a second or two.
+const CHECKING_LABEL_TIMEOUT_MS = 15000;
+
+function isCheckingStatus(status: string): boolean {
+    return status.toLowerCase().startsWith('checking');
+}
+
 function App() {
     const savedToken = localStorage.getItem('wf_token');
 
@@ -41,6 +49,16 @@ function App() {
     const [updatePhase, setUpdatePhase] = useState<'idle' | 'downloading' | 'installing' | 'ready'>('idle');
     const [otaProgress, setOtaProgress] = useState<number>(0);
 
+    // Pending auto-clear for a transient OTA label, so a later event can cancel it.
+    const otaStatusTimerRef = useRef<number | null>(null);
+
+    const clearOtaStatusTimer = () => {
+        if (otaStatusTimerRef.current !== null) {
+            window.clearTimeout(otaStatusTimerRef.current);
+            otaStatusTimerRef.current = null;
+        }
+    };
+
     // Fetch app version on mount
     useEffect(() => {
         const api = (window as any).electronAPI;
@@ -50,7 +68,20 @@ function App() {
 
         if (api?.onOtaStatus) {
             api.onOtaStatus((status: string) => {
+                clearOtaStatusTimer();
                 setOtaStatus(status);
+
+                // "Checking for update..." is transient — it should be visible
+                // only while a check is genuinely in flight. Every other event
+                // supersedes it, but a check can also end silently (suppressed
+                // error, dropped connection), so time it out as a backstop.
+                if (isCheckingStatus(status)) {
+                    otaStatusTimerRef.current = window.setTimeout(
+                        () => setOtaStatus(''),
+                        CHECKING_LABEL_TIMEOUT_MS
+                    );
+                    return;
+                }
 
                 if (status.startsWith('Downloading:')) {
                     setUpdatePhase('downloading');
@@ -72,8 +103,17 @@ function App() {
                 }
 
                 if (status.includes('up to date')) {
-                    setTimeout(() => setOtaStatus(''), 5000);
+                    otaStatusTimerRef.current = window.setTimeout(() => setOtaStatus(''), 5000);
                 }
+            });
+        }
+
+        // A check that ended with no reportable outcome. Retire the label only
+        // if it is still the checking one — a later event may have moved on.
+        if (api?.onOtaCheckFinished) {
+            api.onOtaCheckFinished(() => {
+                clearOtaStatusTimer();
+                setOtaStatus((current) => (isCheckingStatus(current) ? '' : current));
             });
         }
 
@@ -82,6 +122,8 @@ function App() {
                 setReadyVersion(v);
             });
         }
+
+        return () => clearOtaStatusTimer();
     }, []);
 
     const handleRestart = () => {
