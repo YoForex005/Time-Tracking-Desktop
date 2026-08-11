@@ -2,9 +2,14 @@ interface TitlebarProps {
     userName: string;
 }
 
+const TITLEBAR_CONTROLS_STYLE = {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+    WebkitAppRegion: 'no-drag',
+} as const;
+
 export default function Titlebar({ userName }: TitlebarProps) {
-    const eAPI = () => (window as unknown as { electronAPI?: Record<string, () => void> }).electronAPI;
-    
     // Dynamic greeting calculation
     const hour = new Date().getHours();
     let greeting = 'Good morning';
@@ -12,17 +17,12 @@ export default function Titlebar({ userName }: TitlebarProps) {
     else if (hour >= 17) greeting = 'Good evening';
 
     const handleClose = () => {
-        // Dispatch a custom event to allow React components to intercept the close
-        const event = new CustomEvent('request-app-close', { cancelable: true });
-        const canceled = !window.dispatchEvent(event);
-        
-        // If the event wasn't preventDefault()'d by an active timer, close the window
-        if (!canceled) {
-            eAPI()?.close();
-        }
+        // The app now hides to the system tray when closed, so tracking keeps
+        // running silently in the background. No warning popup is needed.
+        window.electronAPI?.close();
     };
     
-    const handleMin = () => eAPI()?.minimize();
+    const handleMin = () => window.electronAPI?.minimize();
 
     return (
         <div className="titlebar">
@@ -31,7 +31,7 @@ export default function Titlebar({ userName }: TitlebarProps) {
             </div>
 
             <div className="titlebar__right">
-                <div className="titlebar__controls" style={{ display: 'flex', gap: '8px', alignItems: 'center', WebkitAppRegion: 'no-drag' } as any}>
+                <div className="titlebar__controls" style={TITLEBAR_CONTROLS_STYLE}>
                     <button className="titlebar__icon-btn" title="Minimize" onClick={handleMin}>
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M2 6H10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>

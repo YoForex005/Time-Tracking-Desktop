@@ -17,7 +17,18 @@
 
 process.noDeprecation = true; // Hides non-critical node warnings (like url.parse)
 
-const { app, BrowserWindow, ipcMain, powerMonitor, shell, Notification, screen } = require('electron');
+const {
+    app,
+    BrowserWindow,
+    ipcMain,
+    powerMonitor,
+    shell,
+    Notification,
+    screen,
+    Tray,
+    Menu,
+    autoUpdater: nativeAutoUpdater,
+} = require('electron');
 const Sentry = require('@sentry/electron/main');
 const { autoUpdater } = require('electron-updater');
 const axios = require('axios');
@@ -146,6 +157,10 @@ let disconnectIntentSent = false;
 let exitIntentInProgress = false;
 let forceQuitAfterExitIntent = false;
 let quittingForUpdate = false;
+let isQuitting = false;
+let applicationCleanupStarted = false;
+let updaterListenersRegistered = false;
+let tray = null;                    // system tray icon — keeps app alive after window close
 
 // Tracks the current shift status so main.js can act on sleep/suspend
 // without waiting for the renderer (which may be too slow before network drops).
@@ -247,6 +262,7 @@ function sendExitIntentThenQuit(reason, options = {}) {
     void sendDisconnectIntent(reason, { timeoutMs: options.timeoutMs || 2500 })
         .finally(() => {
             forceQuitAfterExitIntent = true;
+            isQuitting = true;
             app.quit();
         });
 }
@@ -355,6 +371,46 @@ function sendOtaStatus(message) {
     }
 }
 
+function registerUpdaterListeners() {
+    if (updaterListenersRegistered) return;
+    updaterListenersRegistered = true;
+
+    autoUpdater.on('checking-for-update', () => {
+        sendOtaStatus('Checking for update...');
+    });
+
+    autoUpdater.on('update-available', (info) => {
+        sendOtaStatus(`Update v${info.version} available. Downloading...`);
+    });
+
+    autoUpdater.on('update-not-available', () => {
+        sendOtaStatus('App is up to date.');
+    });
+
+    autoUpdater.on('error', (err) => {
+        console.error(`[OTA] Update error (suppressed in UI): ${err.message}`);
+        // Tell the renderer the check ended so its transient checking state
+        // does not remain visible after a suppressed updater error.
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ota-check-finished');
+        }
+    });
+
+    autoUpdater.on('download-progress', (progressObj) => {
+        const msg = `Downloading: ${Math.round(progressObj.percent)}%`;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ota-status', msg);
+        }
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+        sendOtaStatus('Update ready to install.');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ota-update-ready', info.version);
+        }
+    });
+}
+
 /**
  * Whether the user is currently considered idle.
  * Tracks state so we only emit events on transitions, not on every poll.
@@ -377,6 +433,15 @@ function focusMainWindow() {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
+}
+
+function showMainWindow() {
+    if (isQuitting) return;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow();
+        return;
+    }
+    focusMainWindow();
 }
 
 function bringMainWindowToFront() {
@@ -1090,7 +1155,7 @@ function showOvertimePromptWindow(workSecs = 28800, breakSecs = 3600) {
     promptWindow.webContents.once('did-finish-load', revealPromptWindow);
 
     promptWindow.on('close', (event) => {
-        if (overtimePromptCloseAllowed) return;
+        if (isQuitting || overtimePromptCloseAllowed) return;
         event.preventDefault();
         focusOvertimePromptWindow();
     });
@@ -1272,7 +1337,11 @@ function setupBreakReminder(activeBreakStartTime, breakReminderAfterSecs, breakR
 
 function dispatchAuthCallback(url) {
     if (!url) return;
-    if (!mainWindow || mainWindow.isDestroyed()) {
+    if (
+        !mainWindow ||
+        mainWindow.isDestroyed() ||
+        mainWindow.webContents.isLoading()
+    ) {
         pendingAuthCallbackUrl = url;
         return;
     }
@@ -1315,12 +1384,11 @@ function handleDeepLink(rawUrl) {
 
 if (gotSingleInstanceLock) {
     app.on('second-instance', (_event, commandLine) => {
+        showMainWindow();
         const deepLink = extractDeepLink(commandLine);
         if (deepLink) {
             handleDeepLink(deepLink);
-            return;
         }
-        focusMainWindow();
     });
 }
 
@@ -1349,6 +1417,36 @@ function startBackend() {
     backendProcess.stdout.on('data', (d) => console.log('[Backend]', d.toString()));
     backendProcess.stderr.on('data', (d) => console.error('[Backend]', d.toString()));
     backendProcess.on('error', (err) => console.error('[Backend] Failed to start:', err));
+}
+
+function stopBackendProcess() {
+    if (!backendProcess) return;
+    try {
+        backendProcess.kill();
+    } catch (err) {
+        console.warn('[Backend] Failed to stop backend process:', err);
+    } finally {
+        backendProcess = null;
+    }
+}
+
+function cleanupApplicationResources(reason) {
+    if (applicationCleanupStarted) return;
+    applicationCleanupStarted = true;
+
+    console.log(`[Lifecycle] Cleaning up application resources (${reason})`);
+    tracker.stopTracking();
+    screenshotScheduler.stop();
+    wfhScreenMonitor.stop();
+    stopHeartbeatLoop();
+    clearBreakReminder(reason);
+    closeOvertimePromptWindow();
+    stopBackendProcess();
+
+    if (tray && !tray.isDestroyed()) {
+        tray.destroy();
+    }
+    tray = null;
 }
 
 // ── Idle Detection ────────────────────────────────────────────────────────────
@@ -1449,7 +1547,7 @@ function startScreenLockDetection() {
 // ── Window ────────────────────────────────────────────────────────────────────
 
 function createWindow() {
-    mainWindow = new BrowserWindow({
+    const createdWindow = new BrowserWindow({
         width: 480,
         height: 500,
         minWidth: 420,
@@ -1472,75 +1570,139 @@ function createWindow() {
         backgroundColor: '#0a0b0f',
         show: false, // show only after ready-to-show to avoid white flash
     });
+    mainWindow = createdWindow;
 
     const startUrl = isDev
         ? 'http://localhost:5173'
         : `file://${path.join(__dirname, '../dist/index.html')}`;
 
-    mainWindow.loadURL(startUrl);
-    mainWindow.webContents.on('did-finish-load', () => {
-        if (!pendingAuthCallbackUrl || !mainWindow || mainWindow.isDestroyed()) return;
+    createdWindow.loadURL(startUrl);
+    createdWindow.webContents.on('did-finish-load', () => {
+        if (!pendingAuthCallbackUrl || createdWindow.isDestroyed()) return;
         const url = pendingAuthCallbackUrl;
         pendingAuthCallbackUrl = null;
-        mainWindow.webContents.send('auth-callback', { url });
+        createdWindow.webContents.send('auth-callback', { url });
     });
-    mainWindow.once('ready-to-show', () => {
-        mainWindow.show();
+    createdWindow.once('ready-to-show', () => {
+        if (createdWindow.isDestroyed()) return;
+        createdWindow.show();
         // Start silent application tracking
-        tracker.startTracking(mainWindow);
+        tracker.startTracking(createdWindow);
         // Start silent periodic screenshot scheduler
         screenshotScheduler.start();
     });
-    mainWindow.on('closed', () => {
-        tracker.stopTracking();
-        screenshotScheduler.stop();
-        clearBreakReminder('window closed');
-        mainWindow = null;
+
+    // ── Hide to Tray on Close ────────────────────────────────────────────────
+    // When the user presses the X button or closes from the Windows taskbar,
+    // we hide the window instead of destroying it so tracking keeps running
+    // silently in the background. The tray icon lets them reopen or truly quit.
+    createdWindow.on('close', (event) => {
+        if (isQuitting) return;
+        event.preventDefault();
+        createdWindow.hide();
+        console.log('[Tray] Window hidden — tracking continues in background');
     });
 
-    // ── OTA Listeners ────────────────────────────────────────────────────────
+    // Windows reports shutdown/restart/logoff through BrowserWindow session
+    // events rather than powerMonitor's macOS/Linux-only shutdown event.
+    if (process.platform === 'win32') {
+        createdWindow.on('query-session-end', (event) => {
+            console.log('[Lifecycle] Windows session is ending');
+            stopHeartbeatLoop();
 
-    autoUpdater.on('checking-for-update', () => {
-        sendOtaStatus('Checking for update...');
-    });
+            if (!shouldSendExitIntent()) {
+                isQuitting = true;
+                return;
+            }
 
-    autoUpdater.on('update-available', (info) => {
-        sendOtaStatus(`Update v${info.version} available. Downloading...`);
-    });
+            event.preventDefault();
+            sendExitIntentThenQuit('system_shutdown', { timeoutMs: 2500 });
+        });
 
-    autoUpdater.on('update-not-available', () => {
-        sendOtaStatus('App is up to date.');
-    });
+        createdWindow.on('session-end', () => {
+            isQuitting = true;
+            stopHeartbeatLoop();
+            if (shouldSendExitIntent()) {
+                void sendDisconnectIntent('system_shutdown', { timeoutMs: 1500 });
+            }
+        });
+    }
 
-    autoUpdater.on('error', (err) => {
-        console.error(`[OTA] Update error (suppressed in UI): ${err.message}`);
-        // The error text stays out of the UI, but the renderer still needs to
-        // know the check ended — otherwise the transient "checking for
-        // updates" label has nothing to supersede it and stays on screen.
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ota-check-finished');
+    createdWindow.on('closed', () => {
+        if (mainWindow === createdWindow) {
+            tracker.stopTracking();
+            screenshotScheduler.stop();
+            clearBreakReminder('window closed');
+            mainWindow = null;
         }
     });
+}
 
-    autoUpdater.on('download-progress', (progressObj) => {
-        const msg = `Downloading: ${Math.round(progressObj.percent)}%`;
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ota-status', msg);
-        }
-    });
+// ── System Tray ───────────────────────────────────────────────────────────────
 
-    autoUpdater.on('update-downloaded', (info) => {
-        sendOtaStatus('Update ready to install.');
-        if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ota-update-ready', info.version);
-        }
-    });
+/**
+ * Creates (or recreates) the system tray icon.
+ *
+ * The tray keeps the app process alive after the window is hidden.
+ * Context menu:
+ *   - Open YO HRMX  → show the main window
+ *   - Quit           → send disconnect intent then fully exit
+ */
+function createTray() {
+    if (tray && !tray.isDestroyed()) return; // already exists
+
+    const iconPath = path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+    tray = new Tray(iconPath);
+    tray.setToolTip('YO HRMX — Running in background');
+
+    const buildContextMenu = () => Menu.buildFromTemplate([
+        {
+            label: 'Open YO HRMX',
+            click: showMainWindow,
+        },
+        { type: 'separator' },
+        {
+            label: 'Quit',
+            click: () => {
+                console.log('[Tray] Quit selected — stopping tracking and exiting');
+                if (shouldSendExitIntent()) {
+                    sendExitIntentThenQuit('tray_quit');
+                } else {
+                    forceQuitAfterExitIntent = true;
+                    isQuitting = true;
+                    app.quit();
+                }
+            },
+        },
+    ]);
+
+    tray.setContextMenu(buildContextMenu());
+
+    // Double-click on tray icon → show window
+    tray.on('double-click', showMainWindow);
+
+    console.log('[Tray] System tray icon created');
 }
 
 // ── App Lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
     if (!gotSingleInstanceLock) return;
+    registerUpdaterListeners();
+
+    // electron-updater emits this on Electron's native autoUpdater before it
+    // closes windows. Mark the app as quitting synchronously so close-to-tray
+    // cannot cancel an update installation.
+    nativeAutoUpdater.on('before-quit-for-update', () => {
+        if (quittingForUpdate) return;
+        quittingForUpdate = true;
+        isQuitting = true;
+        stopHeartbeatLoop();
+        void sendDisconnectIntent('before_quit_for_update', { timeoutMs: 1500 });
+        console.log('[OTA] Quitting for update — stopping backend process');
+        stopBackendProcess();
+    });
+
     // ── IPC: Window Controls ──────────────────────────────────────────────────
     // Register IPC handlers after the app is fully ready
     ipcMain.on('window-close', () => mainWindow && mainWindow.close());
@@ -1780,6 +1942,7 @@ app.whenReady().then(() => {
 
     startBackend();
     createWindow();
+    createTray();  // tray icon keeps app alive after window close
 
     // ── OTA Check Logic ──────────────────────────────────────────────────────
 
@@ -1802,10 +1965,13 @@ app.whenReady().then(() => {
     app.on('before-quit', (event) => {
         stopHeartbeatLoop();
 
-        if (forceQuitAfterExitIntent || quittingForUpdate || !shouldSendExitIntent()) {
-            if (quittingForUpdate) {
-                void sendDisconnectIntent('before_quit_for_update', { timeoutMs: 1500 });
-            }
+        if (isQuitting || forceQuitAfterExitIntent || quittingForUpdate) {
+            isQuitting = true;
+            return;
+        }
+
+        if (!shouldSendExitIntent()) {
+            isQuitting = true;
             return;
         }
 
@@ -1815,25 +1981,9 @@ app.whenReady().then(() => {
         sendExitIntentThenQuit('before_quit');
     });
 
-    app.on('before-quit-for-update', () => {
-        quittingForUpdate = true;
-        stopHeartbeatLoop();
-    });
-
-    // ── OTA: Kill backend before update installs ──────────────────────────────
-    // electron-updater fires this event just before quitAndInstall() hands
-    // control to the installer. Killing the backend here frees any file locks
-    // so Windows can overwrite the core files during the update.
-    app.on('before-quit-for-update', () => {
-        console.log('[OTA] Quitting for update — stopping backend process');
-        if (backendProcess) {
-            backendProcess.kill();
-            backendProcess = null;
-        }
-    });
-
     powerMonitor.on('shutdown', (event) => {
         if (!shouldSendExitIntent()) {
+            isQuitting = true;
             stopHeartbeatLoop();
             return;
         }
@@ -1898,15 +2048,27 @@ app.whenReady().then(() => {
     }
 
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow();
+        showMainWindow();
     });
 });
 
 app.on('window-all-closed', () => {
-    tracker.stopTracking();
-    screenshotScheduler.stop();
-    stopHeartbeatLoop();
-    clearBreakReminder('all windows closed');
-    if (backendProcess) backendProcess.kill();
-    if (process.platform !== 'darwin') app.quit();
+    // When using the system tray, the app intentionally keeps running after the
+    // last window closes (the tray icon keeps it alive). We only do final cleanup
+    // here when there is no tray (e.g. the tray was destroyed just before a real quit).
+    if (!isQuitting && tray && !tray.isDestroyed()) {
+        // App is still alive in the tray — do NOT quit.
+        console.log('[Tray] All windows closed but tray is active — staying alive in background');
+        return;
+    }
+    cleanupApplicationResources('all windows closed');
+    if (process.platform !== 'darwin' && !isQuitting) {
+        isQuitting = true;
+        app.quit();
+    }
+});
+
+app.on('will-quit', () => {
+    isQuitting = true;
+    cleanupApplicationResources('will quit');
 });

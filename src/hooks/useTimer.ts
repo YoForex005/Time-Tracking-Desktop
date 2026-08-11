@@ -55,6 +55,7 @@ declare global {
             minimize: () => void;
             maximize: () => void;
             close: () => void;
+            openDashboard?: () => void;
             // Idle detection
             onIdleStart: (cb: (startTime: string) => void) => void;
             onIdleEnd: (cb: () => void) => void;
