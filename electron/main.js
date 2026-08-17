@@ -38,6 +38,7 @@ const { spawn, execFile } = require('child_process');
 const tracker = require('./tracking/tracker');
 const screenshotScheduler = require('./tracking/screenshotScheduler');
 const wfhScreenMonitor = require('./tracking/wfhScreenMonitor');
+const inputActivityMonitor = require('./tracking/inputActivityMonitor');
 const { URL } = require('url');
 
 function loadLocalEnv() {
@@ -127,6 +128,7 @@ console.log(`[Config] WEB_APP_URL=${WEB_APP_URL}`);
  */
 let IDLE_THRESHOLD_SECS = 60;            // hardware (input) idle — updated via IPC after login
 let WFH_SCREEN_IDLE_THRESHOLD_SECS = 240; // screen static idle — independent setting, updated via IPC
+let SUSPICIOUS_IDLE_THRESHOLD_SECS = 300;  // 5 min — suspicious activity detection grace period
 
 let wfhConfig = {
     intervalMs: 15000,
@@ -1438,6 +1440,7 @@ function cleanupApplicationResources(reason) {
     tracker.stopTracking();
     screenshotScheduler.stop();
     wfhScreenMonitor.stop();
+    inputActivityMonitor.stop();
     stopHeartbeatLoop();
     clearBreakReminder(reason);
     closeOvertimePromptWindow();
@@ -1447,6 +1450,38 @@ function cleanupApplicationResources(reason) {
         tray.destroy();
     }
     tray = null;
+}
+
+// ── Suspicious Activity Monitor (Observe-Only) ───────────────────────────────
+//
+// This module runs alongside idle detection but is COMPLETELY SEPARATE.
+// It does NOT feed into the idle formula or affect working time calculations.
+// It only emits IPC events so the dashboard can display a warning badge.
+// Admins can review suspicious activity data before deciding to enforce.
+
+function startSuspiciousActivityMonitor() {
+    inputActivityMonitor.start(
+        SUSPICIOUS_IDLE_THRESHOLD_SECS,
+        // onSuspiciousStart
+        ({ startedAt, metrics }) => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            // Only emit when user is actively on a working shift
+            if (currentShiftStatus !== 'working') return;
+            mainWindow.webContents.send('suspicious-activity-start', {
+                startedAt: formatLocalIsoWithOffset(startedAt),
+                metrics,
+            });
+        },
+        // onSuspiciousEnd
+        ({ startedAt, durationSecs, endedAt }) => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            mainWindow.webContents.send('suspicious-activity-end', {
+                startedAt: formatLocalIsoWithOffset(startedAt),
+                endedAt: formatLocalIsoWithOffset(endedAt),
+                durationSecs,
+            });
+        }
+    );
 }
 
 // ── Idle Detection ────────────────────────────────────────────────────────────
@@ -1831,6 +1866,15 @@ app.whenReady().then(() => {
         }
     });
 
+    // ── IPC: Suspicious Activity Threshold ───────────────────────────────────
+    ipcMain.on('set-suspicious-idle-threshold', (_event, seconds) => {
+        if (typeof seconds === 'number' && seconds >= 60) {
+            SUSPICIOUS_IDLE_THRESHOLD_SECS = Math.round(seconds);
+            console.log(`[InputMonitor] Suspicious threshold updated to ${SUSPICIOUS_IDLE_THRESHOLD_SECS}s`);
+            startSuspiciousActivityMonitor();
+        }
+    });
+
     ipcMain.on('set-wfh-screen-idle-threshold', (_event, seconds) => {
         if (typeof seconds === 'number' && seconds >= 10) {
             const newThreshold = Math.round(seconds);
@@ -1904,6 +1948,9 @@ app.whenReady().then(() => {
                 mainWindow.webContents.send('idle-end');
             }
         }
+        // Reset the activity monitor on any shift/mode change so stale samples
+        // don't bleed into the new segment.
+        inputActivityMonitor.reset();
     });
 
     // ── IPC: Open Login in System Browser (Device Flow) ─────────────────────
@@ -1959,8 +2006,9 @@ app.whenReady().then(() => {
         autoUpdater.checkForUpdates().catch(err => console.error('[OTA] Periodic check failed:', err));
     }, ONE_HOUR);
 
-    startIdlePolling();        // begin monitoring system idle time
-    startScreenLockDetection(); // begin monitoring screen lock/unlock
+    startIdlePolling();              // begin monitoring system idle time
+    startScreenLockDetection();       // begin monitoring screen lock/unlock
+    startSuspiciousActivityMonitor(); // begin monitoring input patterns (observe-only)
 
     app.on('before-quit', (event) => {
         stopHeartbeatLoop();

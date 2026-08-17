@@ -172,6 +172,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         breakReminderAfterSecs, breakReminderRepeatSecs,
         isOvertimeActive, overtimeSecs, overtimeStatus, overtimeAccepted,
         currentShiftId, workLocation,
+        suspiciousActivityActive, suspiciousActivitySecs,
     } = useTimer();
     const { requestOvertimeConfirmation } = useOvertimePrompt();
 
@@ -533,6 +534,27 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
                                 <span style={{ fontSize: 11, fontWeight: 700, background: '#dbeafe', color: '#1d4ed8', padding: '3px 10px', borderRadius: 999 }}>
                                     🏠 Work From Home
+                                </span>
+                            </div>
+                        )}
+
+                        {/* Suspicious Activity Warning (observe-only) */}
+                        {status !== 'stopped' && suspiciousActivityActive && (
+                            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
+                                <span style={{
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                                    color: '#92400e',
+                                    padding: '4px 12px',
+                                    borderRadius: 999,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                    boxShadow: '0 2px 8px rgba(251, 191, 36, 0.25)',
+                                    animation: 'pulse 2s ease-in-out infinite',
+                                }}>
+                                    ⚠️ Suspicious activity — {formatDuration(suspiciousActivitySecs)}
                                 </span>
                             </div>
                         )}

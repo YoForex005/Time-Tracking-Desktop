@@ -96,6 +96,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeAllListeners('idle-end');
     },
 
+    // ── Suspicious Activity Detection (Observe-Only) ─────────────────────────
+    // Emitted when the inputActivityMonitor detects suspicious patterns
+    // (e.g. mouse jiggler, passive video). Does NOT affect idle or working
+    // time calculations — dashboard display and logging only.
+
+    onSuspiciousActivityStart: (callback) => {
+        ipcRenderer.on('suspicious-activity-start', (_event, data) => callback(data));
+    },
+    onSuspiciousActivityEnd: (callback) => {
+        ipcRenderer.on('suspicious-activity-end', (_event, data) => callback(data));
+    },
+    removeSuspiciousActivityListeners: () => {
+        ipcRenderer.removeAllListeners('suspicious-activity-start');
+        ipcRenderer.removeAllListeners('suspicious-activity-end');
+    },
+    setSuspiciousIdleThreshold: (seconds) => ipcRenderer.send('set-suspicious-idle-threshold', seconds),
+
     // ── Screen Lock Detection ────────────────────────────────────────────────
     // Fired when the user locks their screen (e.g. Win+L).
     // The renderer uses these to automatically start/end breaks.

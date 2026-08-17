@@ -246,8 +246,14 @@ export async function startIdleSession(startTime: string) {
         headers: authHeaders(),
         body: JSON.stringify({ startTime, ...clientTimestampPayload() }),
     });
-    // 409 = idle session already open — not a client error
-    if (res.status === 409) return res.json();
+    // Only the explicit duplicate-open conflict is idempotent.
+    if (res.status === 409) {
+        const data = await res.json() as { error?: string; code?: string };
+        // A duplicate open request is idempotent; other conflicts mean the
+        // local live timer must be reset by the caller.
+        if (data.code === 'IDLE_ALREADY_OPEN') return data;
+        throw new Error(data.error || 'Unable to start idle session');
+    }
     return handleResponse(res);
 }
 

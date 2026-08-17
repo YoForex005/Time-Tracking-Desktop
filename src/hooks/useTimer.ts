@@ -60,6 +60,11 @@ declare global {
             onIdleStart: (cb: (startTime: string) => void) => void;
             onIdleEnd: (cb: () => void) => void;
             removeIdleListeners: () => void;
+            // Suspicious activity detection (observe-only)
+            onSuspiciousActivityStart: (cb: (data: { startedAt: string; metrics: Record<string, number> }) => void) => void;
+            onSuspiciousActivityEnd: (cb: (data: { startedAt: string; endedAt: string; durationSecs: number }) => void) => void;
+            removeSuspiciousActivityListeners: () => void;
+            setSuspiciousIdleThreshold: (seconds: number) => void;
             // Screen lock detection
             onScreenLocked: (cb: () => void) => void;
             onScreenUnlocked: (cb: () => void) => void;
@@ -207,6 +212,13 @@ export function useTimer() {
     // The two are combined on every tick to produce a smooth real-time idle counter.
     const [closedIdleSecs, setClosedIdleSecs] = useState(0);
     const [idleSessionStartTime, setIdleSessionStartTime] = useState<Date | null>(null);
+
+    // ── Suspicious Activity state (observe-only) ──────────────────────────────
+    // Tracked separately from idle. Does NOT affect todayWorked calculations.
+    // Displayed on the dashboard as a warning badge for admin review.
+    const [suspiciousActivityActive, setSuspiciousActivityActive] = useState(false);
+    const [suspiciousActivityStartedAt, setSuspiciousActivityStartedAt] = useState<string | null>(null);
+    const [suspiciousActivitySecs, setSuspiciousActivitySecs] = useState(0);
 
     // ── Screen Lock state ─────────────────────────────────────────────────────
     // `lockBreakRef` = true when the current break was automatically started by
@@ -521,6 +533,43 @@ export function useTimer() {
         // Cleanup listeners when component unmounts or status changes
         return () => api.removeIdleListeners();
     }, [status, fetchIdleSecs]);
+
+    // ── Suspicious Activity Listeners (Observe-Only) ──────────────────────────
+    // Tracks whether the inputActivityMonitor has detected suspicious patterns.
+    // This state is COMPLETELY SEPARATE from idle detection and does NOT affect
+    // todayWorked or any working-time calculations.
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api?.onSuspiciousActivityStart) return;
+
+        api.onSuspiciousActivityStart((data) => {
+            console.log('[SuspiciousActivity] ⚠️ Started at', data.startedAt, 'metrics:', data.metrics);
+            setSuspiciousActivityActive(true);
+            setSuspiciousActivityStartedAt(data.startedAt);
+        });
+
+        api.onSuspiciousActivityEnd((data) => {
+            console.log('[SuspiciousActivity] ✓ Ended after', data.durationSecs, 's');
+            setSuspiciousActivityActive(false);
+            setSuspiciousActivityStartedAt(null);
+            setSuspiciousActivitySecs(0);
+        });
+
+        return () => api.removeSuspiciousActivityListeners?.();
+    }, []);
+
+    // Live suspicious seconds counter (increments every second when active)
+    useEffect(() => {
+        if (!suspiciousActivityActive || !suspiciousActivityStartedAt) return;
+        const startMs = new Date(suspiciousActivityStartedAt).getTime();
+        const tickSuspicious = () => {
+            setSuspiciousActivitySecs(Math.floor((Date.now() - startMs) / 1000));
+        };
+        tickSuspicious();
+        const timer = setInterval(tickSuspicious, 1000);
+        return () => clearInterval(timer);
+    }, [suspiciousActivityActive, suspiciousActivityStartedAt]);
 
     // ── Screen Lock / Unlock Listeners (Electron IPC) ─────────────────────────
     // When Win+L is pressed:
@@ -848,5 +897,9 @@ export function useTimer() {
         breakReminderRepeatSecs,
         currentShiftId: currentShift?.id ?? null,
         workLocation: currentShift?.workLocation ?? 'office',
+        // Suspicious activity (observe-only — does NOT affect working time)
+        suspiciousActivityActive,
+        suspiciousActivityStartedAt,
+        suspiciousActivitySecs,
     };
 }
