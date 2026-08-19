@@ -143,7 +143,7 @@ let overtimePromptWindow = null;
 let overtimePromptFocusInterval = null;
 let overtimePromptActionEmitted = false;
 let overtimePromptCloseAllowed = false;
-let lastOvertimePrompt = { workSecs: 28800, breakSecs: 3600 };
+let lastOvertimePrompt = { workSecs: 28800, breakSecs: 1800 };
 let lastOvertimeStatus = null;
 let overtimePromptedShiftId = null;
 let overtimeAcceptedShiftId = null;
@@ -803,7 +803,7 @@ try { (New-Object -ComObject WScript.Shell).AppActivate("Overtime Prompt") | Out
     );
 }
 
-function buildOvertimePromptPopupHtml(workSecs = 28800, breakSecs = 3600) {
+function buildOvertimePromptPopupHtml(workSecs = 28800, breakSecs = 1800) {
     const workLabel = formatDurationForNotification(workSecs);
     const breakLabel = formatDurationForNotification(breakSecs);
 
@@ -1021,7 +1021,7 @@ function emitOvertimePromptAction(action) {
     return true;
 }
 
-function showOvertimePromptWindow(workSecs = 28800, breakSecs = 3600) {
+function showOvertimePromptWindow(workSecs = 28800, breakSecs = 1800) {
     lastOvertimePrompt = { workSecs, breakSecs };
     if (focusOvertimePromptWindow()) return true;
 
@@ -1121,7 +1121,7 @@ function updateOvertimeStatus(payload = {}) {
         todayWorked: Number.isFinite(todayWorked) ? todayWorked : 0,
         todayBreakSecs: Number.isFinite(todayBreakSecs) ? todayBreakSecs : 0,
         workTargetSecs: Number.isFinite(workTargetSecs) && workTargetSecs > 0 ? workTargetSecs : 28800,
-        breakTargetSecs: Number.isFinite(breakTargetSecs) && breakTargetSecs >= 0 ? breakTargetSecs : 3600,
+        breakTargetSecs: Number.isFinite(breakTargetSecs) && breakTargetSecs >= 0 ? breakTargetSecs : 1800,
     };
 
     if (!currentShiftId || status === 'stopped') {

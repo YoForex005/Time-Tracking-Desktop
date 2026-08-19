@@ -199,7 +199,7 @@ export function useTimer() {
     // Admin sets these in the admin portal. Desktop reads them every poll and
     // shows a checkout warning if not met.
     const [expectedWorkSecs, setExpectedWorkSecs] = useState(28800); // 8h default
-    const [expectedBreakSecs, setExpectedBreakSecs] = useState(3600); // 1h default
+    const [expectedBreakSecs, setExpectedBreakSecs] = useState(1800); // 30min default
     const [expectedActiveSecs, setExpectedActiveSecs] = useState(25200); // 7h default
     const [maxBreaks, setMaxBreaks] = useState(3);     // admin-configurable break limit
     const [breakReminderAfterSecs, setBreakReminderAfterSecs] = useState(1800);

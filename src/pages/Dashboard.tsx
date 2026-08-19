@@ -4,7 +4,7 @@ import { useAppTracker } from '../hooks/useAppTracker';
 import { useOvertimePrompt } from '../components/OvertimePromptProvider';
 
 const OFFICE_WORK_TARGET_SECS = 8 * 60 * 60;
-const OFFICE_BREAK_TARGET_SECS = 60 * 60;
+const OFFICE_BREAK_TARGET_SECS = 30 * 60;
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 

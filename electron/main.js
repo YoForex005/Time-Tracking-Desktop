@@ -176,7 +176,7 @@ let overtimePromptWindow = null;
 let overtimePromptFocusInterval = null;
 let overtimePromptActionEmitted = false;
 let overtimePromptCloseAllowed = false;
-let lastOvertimePrompt = { workSecs: 28800, breakSecs: 3600 };
+let lastOvertimePrompt = { workSecs: 28800, breakSecs: 1800 };
 let lastOvertimeStatus = null;
 let overtimePromptedShiftId = null;
 let overtimeAcceptedShiftId = null;
@@ -243,10 +243,12 @@ async function sendDisconnectIntent(reason, options = {}) {
             }
         );
         console.log('[Session] Disconnect intent sent to backend');
+        Sentry.addBreadcrumb({ category: 'disconnect', message: `Intent sent (${reason})`, level: 'info' });
         return true;
     } catch (err) {
         const message = err && err.message ? err.message : 'unknown error';
         console.warn('[Session] Failed to send disconnect intent:', message);
+        Sentry.addBreadcrumb({ category: 'disconnect', message: `Intent failed: ${message}`, level: 'error' });
         return false;
     }
 }
@@ -278,9 +280,22 @@ async function sendHeartbeatPing(context = 'interval') {
 
     try {
         const eventTime = new Date();
+        const systemIdleSecs = powerMonitor.getSystemIdleTime();
+
+        // Include activity metrics so the backend can verify the user is actually active
+        const activeApp = tracker.getCurrentData()?.active;
+        const payload = {
+            ...buildClientTimestampPayload(eventTime),
+            systemIdleSecs,
+            foregroundApp: activeApp?.name ?? null,
+            lastInputAt: systemIdleSecs < 5
+                ? formatLocalIsoWithOffset(eventTime)
+                : formatLocalIsoWithOffset(new Date(Date.now() - systemIdleSecs * 1000)),
+        };
+
         await axios.post(
             `${API_BASE}/time/heartbeat`,
-            buildClientTimestampPayload(eventTime),
+            payload,
             {
                 headers: {
                     'Content-Type': 'application/json',
@@ -289,10 +304,12 @@ async function sendHeartbeatPing(context = 'interval') {
                 timeout: 4000,
             }
         );
+        Sentry.addBreadcrumb({ category: 'heartbeat', message: `Sent (${context})`, level: 'info' });
         console.log(`[Heartbeat] Sent from main process (${context})`);
         return true;
     } catch (err) {
         const message = err && err.message ? err.message : 'unknown error';
+        Sentry.addBreadcrumb({ category: 'heartbeat', message: `Failed: ${message}`, level: 'warning' });
         console.warn(`[Heartbeat] Failed from main process (${context}):`, message);
         return false;
     } finally {
@@ -886,7 +903,7 @@ try { (New-Object -ComObject WScript.Shell).AppActivate("Overtime Prompt") | Out
     );
 }
 
-function buildOvertimePromptPopupHtml(workSecs = 28800, breakSecs = 3600) {
+function buildOvertimePromptPopupHtml(workSecs = 28800, breakSecs = 1800) {
     const workLabel = formatDurationForNotification(workSecs);
     const breakLabel = formatDurationForNotification(breakSecs);
 
@@ -1104,7 +1121,7 @@ function emitOvertimePromptAction(action) {
     return true;
 }
 
-function showOvertimePromptWindow(workSecs = 28800, breakSecs = 3600) {
+function showOvertimePromptWindow(workSecs = 28800, breakSecs = 1800) {
     lastOvertimePrompt = { workSecs, breakSecs };
     if (focusOvertimePromptWindow()) return true;
 
@@ -1204,7 +1221,7 @@ function updateOvertimeStatus(payload = {}) {
         todayWorked: Number.isFinite(todayWorked) ? todayWorked : 0,
         todayBreakSecs: Number.isFinite(todayBreakSecs) ? todayBreakSecs : 0,
         workTargetSecs: Number.isFinite(workTargetSecs) && workTargetSecs > 0 ? workTargetSecs : 28800,
-        breakTargetSecs: Number.isFinite(breakTargetSecs) && breakTargetSecs >= 0 ? breakTargetSecs : 3600,
+        breakTargetSecs: Number.isFinite(breakTargetSecs) && breakTargetSecs >= 0 ? breakTargetSecs : 1800,
     };
 
     if (!currentShiftId || status === 'stopped') {
@@ -1452,18 +1469,40 @@ function cleanupApplicationResources(reason) {
     tray = null;
 }
 
-// ── Suspicious Activity Monitor (Observe-Only) ───────────────────────────────
+// ── Suspicious Activity Monitor (Observe + Report) ───────────────────────────
 //
 // This module runs alongside idle detection but is COMPLETELY SEPARATE.
 // It does NOT feed into the idle formula or affect working time calculations.
-// It only emits IPC events so the dashboard can display a warning badge.
-// Admins can review suspicious activity data before deciding to enforce.
+// It emits IPC events for the dashboard AND persists events to the backend
+// so admins can review suspicious activity history.
+
+async function reportSuspiciousToBackend(data) {
+    if (!sessionAuthToken) return;
+    try {
+        await axios.post(
+            `${API_BASE}/suspicious/report`,
+            data,
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${sessionAuthToken}`,
+                },
+                timeout: 5000,
+            }
+        );
+        console.log('[Suspicious] Reported to backend');
+    } catch (err) {
+        const message = err && err.message ? err.message : 'unknown error';
+        console.warn('[Suspicious] Failed to report to backend:', message);
+    }
+}
 
 function startSuspiciousActivityMonitor() {
     inputActivityMonitor.start(
         SUSPICIOUS_IDLE_THRESHOLD_SECS,
         // onSuspiciousStart
         ({ startedAt, metrics }) => {
+            Sentry.addBreadcrumb({ category: 'suspicious', message: 'Suspicious activity started', level: 'warning', data: metrics });
             if (!mainWindow || mainWindow.isDestroyed()) return;
             // Only emit when user is actively on a working shift
             if (currentShiftStatus !== 'working') return;
@@ -1474,11 +1513,23 @@ function startSuspiciousActivityMonitor() {
         },
         // onSuspiciousEnd
         ({ startedAt, durationSecs, endedAt }) => {
-            if (!mainWindow || mainWindow.isDestroyed()) return;
-            mainWindow.webContents.send('suspicious-activity-end', {
+            const metrics = inputActivityMonitor.getLastMetrics();
+            Sentry.addBreadcrumb({ category: 'suspicious', message: `Suspicious activity ended (${durationSecs}s)`, level: 'warning' });
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('suspicious-activity-end', {
+                    startedAt: formatLocalIsoWithOffset(startedAt),
+                    endedAt: formatLocalIsoWithOffset(endedAt),
+                    durationSecs,
+                });
+            }
+
+            // Persist to backend for admin review
+            void reportSuspiciousToBackend({
                 startedAt: formatLocalIsoWithOffset(startedAt),
                 endedAt: formatLocalIsoWithOffset(endedAt),
                 durationSecs,
+                reason: 'suspicious_input',
+                metrics: metrics ?? {},
             });
         }
     );
@@ -1524,6 +1575,7 @@ function startIdlePolling() {
             const idleStartDate = screenIdleAt < inputIdleStart ? screenIdleAt : inputIdleStart;
             const idleStartTime = formatLocalIsoWithOffset(idleStartDate);
 
+            Sentry.addBreadcrumb({ category: 'idle', message: `User went idle (${idleSecs}s)`, level: 'info' });
             console.log(`[Idle] User went idle. Input idle: ${idleSecs}s, screen idle: ${screenIdle} (Threshold: ${IDLE_THRESHOLD_SECS}s) started at: ${idleStartTime}`);
             mainWindow.webContents.send('idle-start', idleStartTime);
         }
@@ -1531,6 +1583,7 @@ function startIdlePolling() {
         // ── Transition: Idle → Active ──────────────────────────────────────
         if (!nowIdle && isUserIdle) {
             isUserIdle = false;
+            Sentry.addBreadcrumb({ category: 'idle', message: 'User became active', level: 'info' });
             console.log('[Idle] User became active again');
             mainWindow.webContents.send('idle-end');
         }
@@ -1551,8 +1604,9 @@ function startIdlePolling() {
  * lock-break.
  */
 function startScreenLockDetection() {
-    powerMonitor.on('lock-screen', () => {
+    powerMonitor.on('lock-screen', async () => {
         isScreenLocked = true;
+        Sentry.addBreadcrumb({ category: 'screen-lock', message: 'Screen locked', level: 'info' });
 
         // If the user was idle when they locked, clear that state.
         // The lock-break will cover this period going forward.
@@ -1564,15 +1618,40 @@ function startScreenLockDetection() {
             }
         }
 
-        console.log('[ScreenLock] Screen locked — notifying renderer to start break');
+        // ── Direct break API call from main.js (like sleep/suspend) ───────
+        // Previously this was handled by the renderer, which could miss the
+        // event if it was crashed or frozen. Now main.js calls directly.
+        if (currentShiftStatus === 'working') {
+            const ok = await sendBreakToggle('screen-lock');
+            if (ok) {
+                console.log('[ScreenLock] Break started via direct API call');
+            } else {
+                console.warn('[ScreenLock] Break API call failed — falling back to renderer');
+            }
+        } else {
+            console.log(`[ScreenLock] Status is '${currentShiftStatus}' — skipping lock-break`);
+        }
+
+        // Also notify renderer so the UI reflects the state change
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('screen-locked');
         }
     });
 
-    powerMonitor.on('unlock-screen', () => {
+    powerMonitor.on('unlock-screen', async () => {
         isScreenLocked = false;
-        console.log('[ScreenLock] Screen unlocked — notifying renderer to end break');
+        Sentry.addBreadcrumb({ category: 'screen-lock', message: 'Screen unlocked', level: 'info' });
+
+        // ── End lock-break directly from main.js ─────────────────────────
+        if (currentShiftStatus === 'on_break') {
+            const ok = await sendBreakToggle('screen-unlock');
+            if (ok) {
+                console.log('[ScreenLock] Break ended via direct API call');
+            } else {
+                console.warn('[ScreenLock] Break end API call failed — renderer will re-sync');
+            }
+        }
+
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('screen-unlocked');
         }
@@ -2053,10 +2132,9 @@ app.whenReady().then(() => {
     // call often fails after the network drops during suspend.
     powerMonitor.on('suspend', async () => {
         console.log('[Sleep] System suspending');
+        Sentry.addBreadcrumb({ category: 'sleep', message: 'System suspending', level: 'info' });
 
         // Only auto-break if the user is actively working and below limit.
-        // Break limit check is skipped here (backend enforces it anyway and
-        // will return 400 if exceeded — we check the result).
         if (currentShiftStatus !== 'working') {
             console.log(`[Sleep] Status is '${currentShiftStatus}' — skipping sleep break`);
             return;
@@ -2064,6 +2142,34 @@ app.whenReady().then(() => {
 
         const ok = await sendBreakToggle('suspend');
         sleepBreakStarted = ok; // only set flag if the API call succeeded
+
+        // ── Fallback: if break was rejected (maxBreaks exhausted), open an
+        // idle session so sleep time is not silently credited as work. ─────
+        if (!ok && sessionAuthToken) {
+            console.log('[Sleep] Break rejected (maxBreaks?) — opening idle session as fallback');
+            try {
+                const eventTime = new Date();
+                const startTime = new Date(eventTime.getTime() - 1000); // 1s ago
+                await axios.post(
+                    `${API_BASE}/time/idle/start`,
+                    {
+                        startTime: formatLocalIsoWithOffset(startTime),
+                        ...buildClientTimestampPayload(eventTime),
+                    },
+                    {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${sessionAuthToken}`,
+                        },
+                        timeout: 4000,
+                    }
+                );
+                console.log('[Sleep] Idle session opened as fallback for sleep');
+            } catch (idleErr) {
+                const msg = idleErr && idleErr.message ? idleErr.message : 'unknown';
+                console.warn('[Sleep] Failed to open idle fallback:', msg);
+            }
+        }
 
         // Also tell the renderer so the UI reflects the break immediately
         if (ok && mainWindow && !mainWindow.isDestroyed()) {
@@ -2073,8 +2179,26 @@ app.whenReady().then(() => {
 
     powerMonitor.on('resume', async () => {
         console.log('[Sleep] System resumed from sleep');
+        Sentry.addBreadcrumb({ category: 'sleep', message: 'System resumed', level: 'info' });
 
         if (!sleepBreakStarted) {
+            // If we opened an idle fallback instead of a break, close it now
+            if (sessionAuthToken) {
+                try {
+                    await axios.post(
+                        `${API_BASE}/time/idle/end`,
+                        buildClientTimestampPayload(),
+                        {
+                            headers: {
+                                'Content-Type': 'application/json',
+                                Authorization: `Bearer ${sessionAuthToken}`,
+                            },
+                            timeout: 4000,
+                        }
+                    );
+                    console.log('[Sleep] Closed idle fallback session on resume');
+                } catch { /* ignore — idle session may not exist */ }
+            }
             console.log('[Sleep] No sleep break was started — nothing to end');
             return;
         }

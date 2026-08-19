@@ -2,7 +2,7 @@ const { execFile } = require('child_process');
 const axios = require('axios');
 
 const TRACKING_INTERVAL_MS = 5000;
-const SYNC_INTERVAL_MS = 5000;  // sync every tracker poll (5s) for near-real-time admin view
+const SYNC_INTERVAL_MS = 30000;  // sync every 30s — reduces DB churn while keeping data fresh
 
 const API_BASE = process.env.NODE_ENV === 'development'
     ? (process.env.API_BASE || 'http://localhost:3005/api')
