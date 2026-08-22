@@ -3,7 +3,8 @@ const os = require('os');
 
 const API_BASE = process.env.NODE_ENV === 'development'
     ? (process.env.API_BASE || 'http://localhost:3005/api')
-    : 'https://hrmsbackend.yoforex.net/api';
+    : (process.env.API_BASE || 'http://127.0.0.1:3005/api');
+
 
 function getDefaultDeviceId() {
     let username = 'unknown-user';

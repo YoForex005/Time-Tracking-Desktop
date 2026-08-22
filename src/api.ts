@@ -310,3 +310,77 @@ export function subscribeToThresholdEvents(
 
     return () => source.close();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Break Override / Claim API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function submitBreakOverride(breakId: string, reason: string, note?: string) {
+    const res = await apiFetch(`${API_BASE}/time/break-override`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ breakId, reason, note }),
+    });
+    return handleResponse(res);
+}
+
+export async function getMyBreakOverrideRequests() {
+    const res = await apiFetch(`${API_BASE}/time/break-override/my-requests`, {
+        headers: authHeaders(),
+    });
+    return handleResponse(res) as Promise<{
+        requests: Array<{
+            id: string;
+            breakId: string;
+            reason: string;
+            note: string | null;
+            status: 'pending' | 'approved' | 'rejected';
+            requestedAt: string;
+            reviewNote: string | null;
+            break: { startTime: string; endTime: string | null };
+        }>;
+    }>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Leave Balance API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface LeaveBalanceInfo {
+    monthlyQuota: number;
+    monthlyLeavesTaken: number;
+    monthlyRemainingBalance: number;
+    isExceeded: boolean;
+    availableBalance: number;
+    earnedLeaves: number;
+    leavesTaken: number;
+    yearlyBalance: number;
+    activeMonths: number;
+}
+
+export async function getLeaveBalance(): Promise<LeaveBalanceInfo> {
+    const res = await apiFetch(`${API_BASE}/time/leaves/balance`, {
+        headers: authHeaders(),
+    });
+    return handleResponse(res) as Promise<LeaveBalanceInfo>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Holidays & Calendar API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface HolidayItem {
+    id?: string;
+    date: string;
+    name: string;
+    isHoliday: boolean;
+}
+
+export async function getHolidays(year = new Date().getFullYear()): Promise<{ year: number; holidays: HolidayItem[] }> {
+    const res = await apiFetch(`${API_BASE}/holidays?year=${year}`, {
+        headers: authHeaders(),
+    });
+    return handleResponse(res);
+}
+
+

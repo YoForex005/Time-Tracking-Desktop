@@ -12,16 +12,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface LoginPageProps {
-    onLogin: (user: { id: string; name: string; email: string }, token: string) => void;
+    onLogin: (user: { id: string; name: string; email: string; avatarUrl?: string | null }, token: string) => void;
 }
 
 import { API_BASE, WEB_APP_URL } from '../config';
+import logoWide from '../assets/logo-wide.png';
 
 interface DesktopSessionPayload {
     token: string;
     id: string;
     name: string;
     email: string;
+    avatarUrl?: string | null;
     idleThresholdSecs: number;
 }
 
@@ -54,6 +56,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                     id: data.id,
                     name: data.name,
                     email: data.email,
+                    avatarUrl: data.avatarUrl,
                 })
             );
 
@@ -68,7 +71,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             api?.setTrackerAuthToken?.(data.token);
             loginOpenInProgressRef.current = false;
 
-            onLogin({ id: data.id, name: data.name, email: data.email }, data.token);
+            onLogin({ id: data.id, name: data.name, email: data.email, avatarUrl: data.avatarUrl }, data.token);
         },
         [clearPolling, onLogin]
     );
@@ -77,7 +80,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         async (code: string) => {
             if (sessionConsumedRef.current) return;
             try {
+                console.log(`[Polling] Fetching ${API_BASE}/auth/desktop-session/${code}`);
                 const res = await fetch(`${API_BASE}/auth/desktop-session/${code}`);
+                console.log(`[Polling] Response: ${res.status}`);
                 if (res.status === 404) return;
                 if (res.status === 410) {
                     clearPolling();
@@ -89,7 +94,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 if (!res.ok) return;
                 const data = (await res.json()) as DesktopSessionPayload;
                 completeLogin(data);
-            } catch {
+            } catch (err) {
+                console.error(`[Polling Error]`, err);
                 // Retry on next tick.
             }
         },
@@ -158,10 +164,13 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     return (
         <div className="login-page">
             <div className="login-card" style={{ textAlign: 'center', maxWidth: 380, background: 'rgba(255, 255, 255, 0.65)', backdropFilter: 'blur(24px)', border: '1px solid rgba(255,255,255,0.8)' }}>
-                <div className="login__brand">
-
-                    <h1 style={{ letterSpacing: '0.15em', background: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>YO HRMX</h1>
-                    <p>Time Tracker Widget</p>
+                <div className="brand" style={{ marginBottom: 32 }}>
+                    <img src={logoWide} alt="YoForex" style={{ height: '34px', marginBottom: '2px' }} onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling!.removeAttribute('style'); }} />
+                    <div style={{ display: 'none' }}>
+                        <div className="brand-name"><span>YO</span>FOREX</div>
+                        <div className="brand-subtitle" style={{ letterSpacing: '3px' }}>TRUST THE PROCESS</div>
+                    </div>
+                    <div className="brand-subtitle" style={{ color: '#94a3b8', fontSize: '11px', marginTop: '6px', letterSpacing: '2.5px' }}>EMPLOYEE TIME TRACKER</div>
                 </div>
 
                 {expired ? (

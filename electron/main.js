@@ -27,6 +27,7 @@ const {
     screen,
     Tray,
     Menu,
+    nativeImage,
     autoUpdater: nativeAutoUpdater,
 } = require('electron');
 const Sentry = require('@sentry/electron/main');
@@ -89,9 +90,9 @@ if (process.env.SENTRY_TEST_CRASH === '1') {
 
 // Set the app name explicitly for the taskbar and OS integration
 app.setName('YO HRMX');
-// Required for Windows taskbar grouping and notifications to show the correct name
+// Required for Windows taskbar grouping and notifications to show the correct name & icon
 if (process.platform === 'win32') {
-    app.setAppUserModelId(isDev ? process.execPath : 'com.yohrmx.timetracker');
+    app.setAppUserModelId('com.yohrmx.timetracker');
 }
 
 // ── Custom Protocol (Deep-Link Auth) ──────────────────────────────────────────
@@ -114,10 +115,11 @@ if (!gotSingleInstanceLock) {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PRODUCTION_API_BASE = 'https://hrmsbackend.yoforex.net/api';
-const PRODUCTION_WEB_APP_URL = 'https://hrms.yoforex.net';
+const PRODUCTION_API_BASE = 'http://127.0.0.1:3005/api';
+const PRODUCTION_WEB_APP_URL = 'http://localhost:3001';
+
 const API_BASE = isDev ? (process.env.API_BASE || 'http://127.0.0.1:3005/api') : PRODUCTION_API_BASE;
-const WEB_APP_URL = isDev ? (process.env.WEB_APP_URL || 'http://localhost:3000') : PRODUCTION_WEB_APP_URL;
+const WEB_APP_URL = isDev ? (process.env.WEB_APP_URL || 'http://localhost:3001') : PRODUCTION_WEB_APP_URL;
 console.log(`[Config] API_BASE=${API_BASE}`);
 console.log(`[Config] WEB_APP_URL=${WEB_APP_URL}`);
 
@@ -1661,14 +1663,18 @@ function startScreenLockDetection() {
 // ── Window ────────────────────────────────────────────────────────────────────
 
 function createWindow() {
+    const iconPath = path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+    const appIcon = nativeImage.createFromPath(iconPath);
+
     const createdWindow = new BrowserWindow({
         width: 480,
-        height: 500,
-        minWidth: 420,
-        minHeight: 420,
+        height: 680,
+        minWidth: 440,
+        minHeight: 580,
         frame: false,
         titleBarStyle: 'hidden',
-        icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+        icon: appIcon.isEmpty() ? iconPath : appIcon,
+
         webPreferences: {
             nodeIntegration: false,     // security: no direct Node access in renderer
             contextIsolation: true,     // security: renderer and preload have separate contexts
@@ -2059,6 +2065,13 @@ app.whenReady().then(() => {
         shell.openExternal(new URL('/dashboard', WEB_APP_URL).toString());
         console.log('[Auth] Opened browser dashboard');
     });
+
+    ipcMain.on('open-external-page', (_event, targetPath) => {
+        const path = typeof targetPath === 'string' && targetPath.startsWith('/') ? targetPath : `/${targetPath || 'dashboard'}`;
+        shell.openExternal(new URL(path, WEB_APP_URL).toString());
+        console.log('[Auth] Opened browser page:', path);
+    });
+
 
     ipcMain.on('restart-app', () => {
         console.log('[OTA] Restart and install triggered');

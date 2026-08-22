@@ -232,5 +232,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
      * Opens the website dashboard in the system browser.
      */
     openDashboard: () => ipcRenderer.send('open-dashboard'),
+    /**
+     * Opens a specific web app page in the system browser.
+     */
+    openExternalPage: (path) => ipcRenderer.send('open-external-page', path),
 });
+
 

@@ -5,8 +5,9 @@
  * Uses Vite's env variable system (import.meta.env).
  */
 
-const PRODUCTION_API_BASE = 'https://hrmsbackend.yoforex.net/api';
-const PRODUCTION_WEB_APP_URL = 'https://hrms.yoforex.net';
+const PRODUCTION_API_BASE = 'http://127.0.0.1:3005/api';
+const PRODUCTION_WEB_APP_URL = 'http://localhost:3001';
+
 
 export const API_BASE = import.meta.env.PROD
     ? PRODUCTION_API_BASE
@@ -14,4 +15,4 @@ export const API_BASE = import.meta.env.PROD
 
 export const WEB_APP_URL = import.meta.env.PROD
     ? PRODUCTION_WEB_APP_URL
-    : import.meta.env.VITE_WEB_APP_URL ?? 'http://localhost:3000';
+    : import.meta.env.VITE_WEB_APP_URL ?? 'http://localhost:3001';

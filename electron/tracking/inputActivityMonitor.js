@@ -85,8 +85,8 @@ const PS_POLL = `
 $p = New-Object ActivityMon+POINT
 [ActivityMon]::GetCursorPos([ref]$p) | Out-Null
 $fg = [ActivityMon]::GetForegroundWindow()
-$pid = [uint32]0
-[ActivityMon]::GetWindowThreadProcessId($fg, [ref]$pid) | Out-Null
+$outPid = [uint32]0
+[ActivityMon]::GetWindowThreadProcessId($fg, [ref]$outPid) | Out-Null
 $sb = New-Object System.Text.StringBuilder(512)
 [ActivityMon]::GetWindowText($fg, $sb, 512) | Out-Null
 $kb = $false
@@ -94,7 +94,7 @@ for ($vk = 0x08; $vk -le 0x5A; $vk++) {
     if (([ActivityMon]::GetAsyncKeyState($vk) -band 0x8000) -ne 0) { $kb = $true; break }
 }
 $cl = (([ActivityMon]::GetAsyncKeyState(0x01) -band 0x8000) -ne 0) -or (([ActivityMon]::GetAsyncKeyState(0x02) -band 0x8000) -ne 0) -or (([ActivityMon]::GetAsyncKeyState(0x04) -band 0x8000) -ne 0)
-[PSCustomObject]@{X=$p.X;Y=$p.Y;Pid=[int]$pid;Title=$sb.ToString();Kb=$kb;Cl=$cl} | ConvertTo-Json -Compress
+[PSCustomObject]@{X=$p.X;Y=$p.Y;Pid=[int]$outPid;Title=$sb.ToString();Kb=$kb;Cl=$cl} | ConvertTo-Json -Compress
 Write-Output '${RESPONSE_DELIMITER}'
 `;
 

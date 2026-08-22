@@ -1,169 +1,36 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useTimer, formatDuration } from '../hooks/useTimer';
+import { useTimer } from '../hooks/useTimer';
 import { useAppTracker } from '../hooks/useAppTracker';
 import { useOvertimePrompt } from '../components/OvertimePromptProvider';
+
+import EmployeeHeader from '../components/EmployeePopup/EmployeeHeader';
+import WorkStatusHero from '../components/EmployeePopup/WorkStatusHero';
+import TodaySummaryCards from '../components/EmployeePopup/TodaySummaryCards';
+import ActionButtons from '../components/EmployeePopup/ActionButtons';
+import QuickNavigation from '../components/EmployeePopup/QuickNavigation';
+import ProfileDrawer from '../components/EmployeePopup/ProfileDrawer';
+import LeaveSummaryModal from '../components/EmployeePopup/LeaveSummaryModal';
+import ClockInModal from '../components/EmployeePopup/ClockInModal';
+import CheckoutWarningModal from '../components/EmployeePopup/CheckoutWarningModal';
+import ManageBreaksModal from '../components/EmployeePopup/ManageBreaksModal';
+import CalendarModal from '../components/EmployeePopup/CalendarModal';
+import { WEB_APP_URL } from '../config';
+
+
+
+
 
 const OFFICE_WORK_TARGET_SECS = 8 * 60 * 60;
 const OFFICE_BREAK_TARGET_SECS = 30 * 60;
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-/** Displays the current shift status as a coloured badge */
-function StatusBadge({ status }: { status: string }) {
-    const labels: Record<string, string> = {
-        stopped: 'Not Clocked In',
-        working: 'Working',
-        on_break: 'On Break',
-    };
-    return (
-        <span className={`status-badge ${status}`}>
-            <span className="dot" />
-            {labels[status] ?? status}
-        </span>
-    );
-}
-
-// ── ClockInLocationModal ──────────────────────────────────────────────────
-
-function ClockInLocationModal({
-    onSelect, onCancel
-}: {
-    onSelect: (location: 'wfh' | 'office') => void;
-    onCancel: () => void;
-}) {
-    return (
-        <div className="modal-overlay" style={{ background: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(8px)' }}>
-            <div className="modal" style={{ background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 24px 64px -12px rgba(0,0,0,0.15)' }}>
-                <div style={{ textAlign: 'center', marginBottom: 12 }}>
-                    <div style={{
-                        width: 56, height: 56, borderRadius: '28px',
-                        background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
-                        boxShadow: '0 8px 16px -4px rgba(59, 130, 246, 0.3)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        margin: '0 auto',
-                        fontSize: 26,
-                    }}>
-                        📍
-                    </div>
-                </div>
-
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
-                    Where are you working today?
-                </h2>
-                <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: '0 0 24px', fontWeight: 500 }}>
-                    Select your work location before clocking in
-                </p>
-
-                <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                    <button
-                        onClick={() => onSelect('wfh')}
-                        style={{
-                            flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid #dbeafe',
-                            background: '#eff6ff', cursor: 'pointer', display: 'flex', flexDirection: 'column',
-                            alignItems: 'center', gap: 8, fontWeight: 700, color: '#1d4ed8', fontSize: 13,
-                            transition: 'all 0.15s',
-                        }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#dbeafe'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#93c5fd'; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#eff6ff'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#dbeafe'; }}
-                    >
-                        <span style={{ fontSize: 28 }}>🏠</span>
-                        Work From Home
-                    </button>
-                    <button
-                        onClick={() => onSelect('office')}
-                        style={{
-                            flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid #dcfce7',
-                            background: '#f0fdf4', cursor: 'pointer', display: 'flex', flexDirection: 'column',
-                            alignItems: 'center', gap: 8, fontWeight: 700, color: '#15803d', fontSize: 13,
-                            transition: 'all 0.15s',
-                        }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#dcfce7'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#86efac'; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f0fdf4'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#dcfce7'; }}
-                    >
-                        <span style={{ fontSize: 28 }}>🏢</span>
-                        In Office
-                    </button>
-                </div>
-
-                <button className="btn btn-ghost" onClick={onCancel} style={{ width: '100%', padding: '10px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 8 }}>
-                    Cancel
-                </button>
-            </div>
-        </div>
-    );
-}
-
-// ── CheckoutWarningModal ──────────────────────────────────────────────────
-
-function CheckoutWarningModal({
-    remainingSecs, onProceed, onCancel
-}: {
-    remainingSecs: number;
-    onProceed: () => void;
-    onCancel: () => void;
-}) {
-    return (
-        <div className="modal-overlay" style={{ background: 'rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(8px)' }}>
-            <div className="modal" style={{ background: 'rgba(255, 255, 255, 0.95)', border: '1px solid rgba(255,255,255,0.5)', boxShadow: '0 24px 64px -12px rgba(0,0,0,0.15)' }}>
-                {/* Clock icon */}
-                <div style={{ textAlign: 'center', marginBottom: 12 }}>
-                    <div style={{
-                        width: 56, height: 56, borderRadius: '28px',
-                        background: 'linear-gradient(135deg, #fffbeb, #fef3c7)',
-                        boxShadow: '0 8px 16px -4px rgba(251, 191, 36, 0.3)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        margin: '0 auto',
-                        fontSize: 26,
-                    }}>
-                        ⏱️
-                    </div>
-                </div>
-
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', textAlign: 'center', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
-                    Not enough work hours
-                </h2>
-                <p style={{ fontSize: 13, color: '#64748b', textAlign: 'center', margin: '0 0 20px', fontWeight: 500 }}>
-                    You still need to work for
-                </p>
-
-                {/* Big remaining time display */}
-                <div style={{
-                    background: 'rgba(248, 250, 252, 0.5)',
-                    border: '1px solid rgba(226, 232, 240, 0.8)',
-                    borderRadius: 16,
-                    padding: '20px 24px',
-                    textAlign: 'center',
-                    marginBottom: 24,
-                }}>
-                    <div style={{ fontSize: 40, fontWeight: 800, color: '#ef4444', letterSpacing: '-2px', fontVariantNumeric: 'tabular-nums', textShadow: '0 4px 16px rgba(239, 68, 68, 0.2)' }}>
-                        {formatDuration(remainingSecs)}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700 }}>
-                        remaining today
-                    </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: 12 }}>
-                    <button className="btn btn-ghost" onClick={onCancel} style={{ flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: 'none' }}>
-                        Keep Working
-                    </button>
-                    <button className="btn btn-danger" onClick={onProceed} style={{ flex: 1, padding: '12px' }}>
-                        Clock Out Anyway
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-
 interface DashboardProps {
     view: string;
     onLogout: () => void;
+    userName?: string;
+    avatarUrl?: string | null;
 }
 
-export default function Dashboard({ view, onLogout }: DashboardProps) {
+export default function Dashboard({ view: _view, onLogout, userName = 'Employee', avatarUrl }: DashboardProps) {
     const {
         status, loading, actionLoading, error,
         handleStart, handleBreak, handleStop, handleStartOvertime,
@@ -173,27 +40,26 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         isOvertimeActive, overtimeSecs, overtimeStatus, overtimeAccepted,
         currentShiftId, workLocation,
         suspiciousActivityActive, suspiciousActivitySecs,
+        breaks,
     } = useTimer();
     const { requestOvertimeConfirmation } = useOvertimePrompt();
 
-    // Clock-in location modal
+    // Modals state
     const [showLocationModal, setShowLocationModal] = useState(false);
+    const [showManageBreaksModal, setShowManageBreaksModal] = useState(false);
+    const [showProfileDrawer, setShowProfileDrawer] = useState(false);
+    const [showLeaveModal, setShowLeaveModal] = useState(false);
+    const [showCalendarModal, setShowCalendarModal] = useState(false);
 
-    const handleClockInClick = () => setShowLocationModal(true);
-    const handleLocationSelect = (location: 'wfh' | 'office') => {
-        setShowLocationModal(false);
-        handleStart(location);
-    };
 
     // Checkout warning modal
     const [showWarning, setShowWarning] = useState(false);
     const [remainingSecs, setRemainingSecs] = useState(0);
     const [proceedingStop, setProceedingStop] = useState(false);
 
-
     const fallbackOvertimePromptedShiftRef = useRef<string | null>(null);
 
-    // Break reminder modal
+    // Break reminder modal / IPC
     const [showBreakReminder, setShowBreakReminder] = useState(false);
     const [nextBreakReminderAtSecs, setNextBreakReminderAtSecs] = useState<number | null>(null);
     const trackedBreakStartRef = useRef<string | null>(null);
@@ -232,7 +98,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
 
         const iconUrl = new URL('icon.png', window.location.href).toString();
         const notification = new window.Notification('You are still on break', {
-            body: `Your current break has been running for ${formatDuration(breakSecs)}.`,
+            body: `Your current break has been running for ${Math.floor(breakSecs / 60)} minutes.`,
             icon: iconUrl,
             silent: false,
         });
@@ -263,26 +129,19 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         }
     }, [showRendererBreakNotification]);
 
-    // Electron implementation: listen to events from main process
     useEffect(() => {
         const api = window.electronAPI;
         if (!api?.onShowBreakReminderModal) return;
 
-        console.log('[Dashboard] Registering show-break-reminder-modal listener');
-
         api.onShowBreakReminderModal?.((secs) => {
-            console.log('[Dashboard] Received show-break-reminder-modal event from Electron, duration:', secs);
             triggerBreakReminder(secs, false);
         });
 
         return () => {
-            console.log('[Dashboard] Cleaning up show-break-reminder-modal listener');
             api.removeShowBreakReminderModal?.();
         };
     }, [triggerBreakReminder]);
 
-    // Renderer-owned reminder timer. This runs in Electron too, so the popup
-    // does not depend entirely on the main-process timeout chain.
     useEffect(() => {
         if (status !== 'on_break' || !activeBreakStartTime) {
             trackedBreakStartRef.current = null;
@@ -347,7 +206,6 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         if (result === 'no') {
             return handleStop({ overtimeAccepted: false });
         }
-
         return handleStartOvertime();
     }, [handleStop, handleStartOvertime]);
 
@@ -392,15 +250,6 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         setShowBreakReminder(false);
         setNextBreakReminderAtSecs(null);
         window.electronAPI?.closeBreakReminderPopup?.();
-        console.log('[Overtime] Requesting global prompt from renderer', {
-            status,
-            workLocation,
-            currentShiftId,
-            todayWorked,
-            todayBreakSecs,
-            workTargetSecs: effectiveOfficeWorkTargetSecs,
-            breakTargetSecs: effectiveOfficeBreakTargetSecs,
-        });
 
         const promptedShiftId = currentShiftId;
         void (async () => {
@@ -409,7 +258,6 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
                 api.showOvertimePrompt(effectiveOfficeWorkTargetSecs, effectiveOfficeBreakTargetSecs);
                 return;
             }
-
             await requestOvertimeConfirmation(handleOvertimeDecision);
         })().catch(() => {
             if (fallbackOvertimePromptedShiftRef.current === promptedShiftId) {
@@ -431,7 +279,14 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         handleOvertimeDecision,
     ]);
 
-    /** Called when user clicks "Check Out" button */
+    // Handle Clock In
+    const handleClockInClick = () => setShowLocationModal(true);
+    const handleLocationSelect = (location: 'wfh' | 'office') => {
+        setShowLocationModal(false);
+        handleStart(location);
+    };
+
+    // Handle Clock Out
     const handleCheckoutClick = () => {
         if (isOvertimeActive) {
             setShowWarning(false);
@@ -448,7 +303,7 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
             setRemainingSecs(maxShortfall);
             setShowWarning(true);
         } else {
-            handleStop(); // All criteria met — proceed immediately
+            handleStop();
         }
     };
 
@@ -459,180 +314,144 @@ export default function Dashboard({ view, onLogout }: DashboardProps) {
         setProceedingStop(false);
     };
 
-
-    // Initialize background app tracking sync
+    // Background app tracking sync
     useAppTracker();
 
     if (loading) {
         return (
-            <div className="main" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div className="spinner" />
+            <div className="control-center-container loading-wrapper">
+                <div className="control-center-skeleton">
+                    <div className="skeleton-row header-skel" />
+                    <div className="skeleton-row hero-skel" />
+                    <div className="skeleton-grid summary-skel" />
+                    <div className="skeleton-row action-skel" />
+                </div>
             </div>
         );
     }
 
+    const liveTimerSecs = isOvertimeActive ? overtimeSecs : todayWorked;
+    const hasCompletedTodayShift = status === 'stopped' && todayWorked > 0;
+
+    const openWebPage = (path: string) => {
+        const api = (window as any).electronAPI;
+        if (api?.openExternalPage) {
+            api.openExternalPage(path);
+        } else if (api?.openDashboard) {
+            api.openDashboard();
+        } else {
+            const targetUrl = `${WEB_APP_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+            window.open(targetUrl, '_blank');
+        }
+    };
+
     return (
-        <div className="main">
-            {/* Clock-in location modal */}
-            {showLocationModal && (
-                <ClockInLocationModal
-                    onSelect={handleLocationSelect}
-                    onCancel={() => setShowLocationModal(false)}
-                />
-            )}
+        <div className="control-center-container">
+            {/* Header / Identity Section */}
+            <EmployeeHeader
+                userName={userName}
+                avatarUrl={avatarUrl}
+                designation="Software Developer"
+                teamName="YoForex Team"
+                role="Employee"
+                onOpenProfile={() => setShowProfileDrawer(true)}
+                onOpenLeave={() => setShowLeaveModal(true)}
+                onLogout={onLogout}
+                canLogout={status === 'stopped'}
+            />
 
-            {/* Checkout warning modal */}
-            {showWarning && (
-                <CheckoutWarningModal
-                    remainingSecs={remainingSecs}
-                    onProceed={confirmStop}
-                    onCancel={() => setShowWarning(false)}
-                />
-            )}
+            {/* Primary Work Status & Live Timer Section */}
+            <WorkStatusHero
+                status={status}
+                liveTimerSecs={liveTimerSecs}
+                isOvertimeActive={isOvertimeActive}
+                workLocation={workLocation}
+                suspiciousActivityActive={suspiciousActivityActive}
+                suspiciousActivitySecs={suspiciousActivitySecs}
+                error={error}
+                hasCompletedTodayShift={hasCompletedTodayShift}
+            />
+
+            {/* Today Summary Metrics (Worked / Break / Overtime) */}
+            <TodaySummaryCards
+                todayWorkedSecs={todayWorked}
+                todayBreakSecs={todayBreakSecs}
+                overtimeSecs={overtimeSecs}
+                expectedWorkSecs={effectiveOfficeWorkTargetSecs}
+                expectedBreakSecs={effectiveOfficeBreakTargetSecs}
+                todayBreaksCount={todayBreaksCount}
+                maxBreaks={maxBreaks}
+            />
+
+            {/* Dynamic Primary & Contextual Action Buttons */}
+            <ActionButtons
+                status={status}
+                actionLoading={actionLoading}
+                breakLimitReached={breakLimitReached}
+                proceedingStop={proceedingStop}
+                onClockIn={handleClockInClick}
+                onTakeBreak={handleBreak}
+                onResumeBreak={handleBreak}
+                onClockOut={handleCheckoutClick}
+                onManageBreaks={() => setShowManageBreaksModal(true)}
+                hasCompletedTodayShift={hasCompletedTodayShift}
+            />
+
+            {/* Quick Navigation Footer Row */}
+            <QuickNavigation
+                onOpenDashboard={() => openWebPage('/dashboard')}
+                onOpenCalendar={() => setShowCalendarModal(true)}
+                onOpenLeave={() => setShowLeaveModal(true)}
+                onOpenProfile={() => setShowProfileDrawer(true)}
+            />
+
+            {/* Modals & Drawers */}
+            <CalendarModal
+                isOpen={showCalendarModal}
+                onClose={() => setShowCalendarModal(false)}
+                onOpenWebCalendar={() => openWebPage('/holiday')}
+            />
 
 
-            {/* ── TRACKER VIEW ─────────────────────────────────────────────── */}
-            {view === 'tracker' && (
-                <>
-                    {/* Yo HRMX Branding Header */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingBottom: 16, paddingTop: 8 }}>
-                        <div style={{
-                            fontSize: 18,
-                            fontWeight: 800,
-                            letterSpacing: '0.15em',
-                            color: 'var(--text-secondary)',
-                            textTransform: 'uppercase'
-                        }}>
-                            Yo HRMX
-                        </div>
-                    </div>
+            <ClockInModal
+                isOpen={showLocationModal}
+                onSelect={handleLocationSelect}
+                onCancel={() => setShowLocationModal(false)}
+            />
 
-                    {/* Timer Control Card */}
-                    <div className="timer-card">
-                        {status === 'working' ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
-                                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 4px 6px rgba(16, 185, 129, 0.3))' }}>
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <polyline points="12 6 12 12 16 14"></polyline>
-                                </svg>
-                            </div>
-                        ) : (
-                            <StatusBadge status={status} />
-                        )}
+            <CheckoutWarningModal
+                isOpen={showWarning}
+                remainingSecs={remainingSecs}
+                onProceed={confirmStop}
+                onCancel={() => setShowWarning(false)}
+            />
 
-                        <div className={`timer-display ${isOvertimeActive ? 'overtime' : status}`} id="timer-display">
-                            {formatDuration(isOvertimeActive ? overtimeSecs : todayWorked)}
-                        </div>
+            <ManageBreaksModal
+                isOpen={showManageBreaksModal}
+                breaks={breaks}
+                onClose={() => setShowManageBreaksModal(false)}
+                currentBreakSecs={currentBreakSecs}
+                totalBreakSecs={todayBreakSecs}
+                expectedBreakSecs={effectiveOfficeBreakTargetSecs}
+                status={status}
+            />
 
-                        <div className="timer-sub">
-                            {status === 'stopped' && 'Ready to work. Clock in when you start.'}
-                            {status === 'working' && (isOvertimeActive ? 'OverTime in progress.' : 'Shift in progress. Stay productive!')}
-                            {status === 'on_break' && "Break in progress. Relax!"}
-                        </div>
+            <ProfileDrawer
+                isOpen={showProfileDrawer}
+                onClose={() => setShowProfileDrawer(false)}
+                userName={userName}
+                avatarUrl={avatarUrl}
+                email="employee@yoforex.net"
+                teamName="YoForex Team"
+                designation="Software Developer"
+                role="Employee"
+                expectedWorkSecs={effectiveOfficeWorkTargetSecs}
+            />
 
-                        {status !== 'stopped' && workLocation === 'wfh' && (
-                            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
-                                <span style={{ fontSize: 11, fontWeight: 700, background: '#dbeafe', color: '#1d4ed8', padding: '3px 10px', borderRadius: 999 }}>
-                                    🏠 Work From Home
-                                </span>
-                            </div>
-                        )}
-
-                        {/* Suspicious Activity Warning (observe-only) */}
-                        {status !== 'stopped' && suspiciousActivityActive && (
-                            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
-                                <span style={{
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
-                                    color: '#92400e',
-                                    padding: '4px 12px',
-                                    borderRadius: 999,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 5,
-                                    boxShadow: '0 2px 8px rgba(251, 191, 36, 0.25)',
-                                    animation: 'pulse 2s ease-in-out infinite',
-                                }}>
-                                    ⚠️ Suspicious activity — {formatDuration(suspiciousActivitySecs)}
-                                </span>
-                            </div>
-                        )}
-
-                        {error && <div className="form-error" style={{ width: '100%', textAlign: 'center' }}>{error}</div>}
-
-                        <div
-                            className="timer-actions"
-                            style={{
-                                display: 'flex',
-                                flexDirection: 'row',
-                                flexWrap: 'nowrap',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: 8,
-                                width: '100%',
-                            }}
-                        >
-                            <button
-                                id="btn-check-in"
-                                className="btn btn-success"
-                                onClick={handleClockInClick}
-                                disabled={status !== 'stopped' || actionLoading}
-                                style={{ flex: '1 1 0', minWidth: 0, whiteSpace: 'nowrap' }}
-                            >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-                                Clock In
-                            </button>
-
-                            <button
-                                id="btn-break"
-                                className={`btn ${status === 'on_break' ? 'btn-primary' : 'btn-warning'}`}
-                                onClick={handleBreak}
-                                disabled={status === 'stopped' || actionLoading || breakLimitReached}
-                                style={{ flex: '1 1 0', minWidth: 0, whiteSpace: 'nowrap' }}
-                            >
-                                {status === 'on_break' ? (
-                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>Resume</>
-                                ) : (
-                                    <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>Break{breakLimitReached ? ' (Max)' : ''}</>
-                                )}
-                            </button>
-
-                            <button
-                                id="btn-check-out"
-                                className="btn btn-danger"
-                                onClick={handleCheckoutClick}
-                                disabled={status === 'stopped' || actionLoading || proceedingStop}
-                                style={{ flex: '1 1 0', minWidth: 0, whiteSpace: 'nowrap' }}
-                            >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /></svg>
-                                Clock Out
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* View Dashboard & Logout (Beneath the timer) */}
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
-                        <button
-                            className="btn"
-                            onClick={() => window.electronAPI?.openDashboard?.()}
-                            style={{ flex: 1, padding: '10px', fontSize: 13, background: 'transparent', border: '1px solid #e2e8f0', color: '#64748b', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
-                        >
-
-                            View Dashboard
-                        </button>
-                        <button
-                            className="btn btn-ghost"
-                            onClick={onLogout}
-                            disabled={status !== 'stopped'}
-                            title={status !== 'stopped' ? 'Please clock out before logging out' : 'Logout'}
-                            style={{ flex: 1, padding: '10px', fontSize: 13, color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 600 }}
-                        >
-                            Logout
-                        </button>
-                    </div>
-                </>
-            )}
+            <LeaveSummaryModal
+                isOpen={showLeaveModal}
+                onClose={() => setShowLeaveModal(false)}
+            />
         </div>
     );
 }

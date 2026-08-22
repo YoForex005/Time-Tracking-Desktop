@@ -3,11 +3,13 @@ import './index.css';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Titlebar from './components/Titlebar';
+import { API_BASE } from './config';
 
 interface User {
     id: string;
     name: string;
     email: string;
+    avatarUrl?: string | null;
 }
 
 function getSavedUser(): User | null {
@@ -21,7 +23,7 @@ function getSavedUser(): User | null {
             typeof parsed.name === 'string' &&
             typeof parsed.email === 'string'
         ) {
-            return { id: parsed.id, name: parsed.name, email: parsed.email };
+            return { id: parsed.id, name: parsed.name, email: parsed.email, avatarUrl: parsed.avatarUrl };
         }
         return null;
     } catch {
@@ -167,6 +169,26 @@ function App() {
         return () => window.removeEventListener('wf:session-expired', onExpired);
     }, []);
 
+    // Sync latest user profile (avatarUrl, name, etc.) from backend
+    useEffect(() => {
+        if (!token) return;
+        fetch(`${API_BASE}/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+        })
+            .then(res => {
+                if (res.ok) return res.json();
+                return null;
+            })
+            .then(data => {
+                if (data?.user) {
+                    console.log('[App] Fetched user profile from /auth/me:', data.user);
+                    setUser(prev => ({ ...(prev || {}), ...data.user }));
+                    localStorage.setItem('wf_user', JSON.stringify(data.user));
+                }
+            })
+            .catch(err => console.error('[App] Failed to fetch /auth/me:', err));
+    }, [token]);
+
     const handleLogin = (u: User, t: string) => {
         setUser(u);
         setToken(t);
@@ -182,7 +204,7 @@ function App() {
     if (!user || !token) {
         return (
             <>
-                <Titlebar userName="Guest" />
+                <Titlebar />
                 <LoginPage onLogin={handleLogin} />
                 {version && (
                     <div className="version-tag">v{version}</div>
@@ -193,20 +215,22 @@ function App() {
 
     return (
         <>
-            <Titlebar userName={user.name} />
-            <Dashboard view="tracker" onLogout={handleLogout} />
+            <Titlebar />
+            <Dashboard view="tracker" onLogout={handleLogout} userName={user.name} avatarUrl={user.avatarUrl} />
 
             {version && (
-                <div className="version-tag">
-                    {updatePhase !== 'idle' && updatePhase !== 'ready' && (
-                        <span style={{ marginRight: '8px', opacity: 0.8 }}>
-                            {updatePhase === 'downloading' ? `downloading: ${otaProgress}%` : `installing: ${otaProgress}%`} |
+                <div className="footer">
+                    <span className="version">v{version}</span>
+                    <div className="footer-dot"></div>
+                    {updatePhase !== 'idle' && updatePhase !== 'ready' ? (
+                        <span>
+                            {updatePhase === 'downloading' ? `downloading: ${otaProgress}%` : `installing: ${otaProgress}%`}
                         </span>
+                    ) : otaStatus && updatePhase === 'idle' && !readyVersion ? (
+                        <span>{otaStatus.toLowerCase()}</span>
+                    ) : (
+                        <span>You're on the latest version</span>
                     )}
-                    {otaStatus && updatePhase === 'idle' && !readyVersion && (
-                        <span style={{ marginRight: '8px', opacity: 0.8 }}>{otaStatus.toLowerCase()} |</span>
-                    )}
-                    v{version}
                 </div>
             )}
 

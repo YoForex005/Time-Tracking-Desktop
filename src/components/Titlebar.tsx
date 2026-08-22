@@ -1,6 +1,4 @@
-interface TitlebarProps {
-    userName: string;
-}
+import logoWide from '../assets/logo-wide.png';
 
 const TITLEBAR_CONTROLS_STYLE = {
     display: 'flex',
@@ -9,13 +7,7 @@ const TITLEBAR_CONTROLS_STYLE = {
     WebkitAppRegion: 'no-drag',
 } as const;
 
-export default function Titlebar({ userName }: TitlebarProps) {
-    // Dynamic greeting calculation
-    const hour = new Date().getHours();
-    let greeting = 'Good morning';
-    if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
-    else if (hour >= 17) greeting = 'Good evening';
-
+export default function Titlebar() {
     const handleClose = () => {
         // The app now hides to the system tray when closed, so tracking keeps
         // running silently in the background. No warning popup is needed.
@@ -26,9 +18,14 @@ export default function Titlebar({ userName }: TitlebarProps) {
 
     return (
         <div className="titlebar">
-            <div className="titlebar__logo">
-                <span className="titlebar__user-label">{greeting}, {userName}</span>
+            <div className="titlebar-left">
+                <img
+                    src={logoWide}
+                    alt="YoForex"
+                    className="titlebar-full-logo"
+                />
             </div>
+
 
             <div className="titlebar__right">
                 <div className="titlebar__controls" style={TITLEBAR_CONTROLS_STYLE}>

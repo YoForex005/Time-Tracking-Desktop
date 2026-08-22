@@ -888,6 +888,7 @@ export function useTimer() {
         overtimeDecisionAt: currentShift?.overtimeDecisionAt ?? null,
         activeBreakStartTime: status === 'on_break' ? activeBreak?.startTime ?? null : null,
         todayBreaksCount,
+        breaks: currentShift?.breaks ?? [],
         todayIdleSecs,        // real-time idle seconds (increments every second)
         expectedWorkSecs,     // org-wide expected total shift length
         expectedBreakSecs,    // org-wide required break time before overtime prompt
