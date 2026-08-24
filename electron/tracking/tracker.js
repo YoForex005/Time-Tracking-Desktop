@@ -6,7 +6,7 @@ const SYNC_INTERVAL_MS = 30000;  // sync every 30s — reduces DB churn while ke
 
 const API_BASE = process.env.NODE_ENV === 'development'
     ? (process.env.API_BASE || 'http://localhost:3005/api')
-    : (process.env.API_BASE || 'http://127.0.0.1:3005/api');
+    : (process.env.API_BASE || 'https://hrmsbackend.yoforex.net/api');
 
 
 const EXCLUDED_PROCESSES = [
