@@ -329,15 +329,6 @@ autoUpdater.autoDownload = true; // Download silently in the background
 // if a tag/release has an incorrect future date.
 autoUpdater.allowPrerelease = false;
 
-// Configure authenticated feed for private GitHub repository
-autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: 'YoForex005',
-    repo: 'Time-Tracking-Desktop',
-    private: true,
-    token: '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',
-});
-
 // Configure logging for updates
 autoUpdater.logger = console;
 
