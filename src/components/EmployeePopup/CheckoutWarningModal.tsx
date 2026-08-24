@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react';
 import { formatDuration } from '../../hooks/useTimer';
 
 interface CheckoutWarningModalProps {
@@ -19,11 +20,7 @@ export default function CheckoutWarningModal({
         <div className="modal-overlay" style={{ background: 'rgba(15, 23, 42, 0.5)', backdropFilter: 'blur(6px)', zIndex: 1100 }}>
             <div className="modal warning-modal-container">
                 <div className="modal-icon-badge warning-badge">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="8" x2="12" y2="12" />
-                        <line x1="12" y1="16" x2="12.01" y2="16" />
-                    </svg>
+                    <AlertTriangle size={24} strokeWidth={2.2} />
                 </div>
 
                 <h2 className="modal-heading-center">Shift Target Not Met</h2>

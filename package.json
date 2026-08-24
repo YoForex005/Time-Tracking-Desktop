@@ -28,6 +28,7 @@
     "axios": "^1.13.5",
     "electron-store": "^11.0.2",
     "electron-updater": "^6.8.3",
+    "lucide-react": "^1.33.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.1"

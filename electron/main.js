@@ -1667,10 +1667,10 @@ function createWindow() {
     const appIcon = nativeImage.createFromPath(iconPath);
 
     const createdWindow = new BrowserWindow({
-        width: 480,
-        height: 680,
-        minWidth: 440,
-        minHeight: 580,
+        width: 440,
+        height: 640,
+        minWidth: 420,
+        minHeight: 560,
         frame: false,
         titleBarStyle: 'hidden',
         icon: appIcon.isEmpty() ? iconPath : appIcon,
@@ -1687,7 +1687,7 @@ function createWindow() {
             allowRunningInsecureContent: false,
             backgroundThrottling: false,
         },
-        backgroundColor: '#0a0b0f',
+        backgroundColor: '#ffffff',
         show: false, // show only after ready-to-show to avoid white flash
     });
     mainWindow = createdWindow;

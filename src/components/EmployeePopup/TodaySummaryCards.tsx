@@ -1,4 +1,5 @@
-import { formatDuration } from '../../hooks/useTimer';
+import { Clock, Coffee, Sparkles } from 'lucide-react';
+import { formatHumanDuration } from '../../hooks/useTimer';
 
 interface TodaySummaryCardsProps {
     todayWorkedSecs: number;
@@ -15,66 +16,86 @@ export default function TodaySummaryCards({
     todayBreakSecs,
     overtimeSecs,
     expectedWorkSecs,
-    todayBreaksCount,
-    maxBreaks,
+    expectedBreakSecs,
 }: TodaySummaryCardsProps) {
-    const formattedWorked = formatDuration(todayWorkedSecs);
-    const formattedBreak = formatDuration(todayBreakSecs);
-    const formattedOvertime = formatDuration(overtimeSecs);
+    const targetWork = expectedWorkSecs > 0 ? expectedWorkSecs : 8 * 3600;
+    const targetBreak = expectedBreakSecs > 0 ? expectedBreakSecs : 3600;
 
-    const formattedTargetWork = formatDuration(expectedWorkSecs || 8 * 3600);
+    // Human readable text
+    const humanWorked = formatHumanDuration(todayWorkedSecs, { showZeroHours: true });
+    const targetWorkHuman = formatHumanDuration(targetWork);
 
+    const humanBreak = formatHumanDuration(todayBreakSecs);
+    const targetBreakHuman = formatHumanDuration(targetBreak);
+
+    const remainingBreakSecs = Math.max(0, targetBreak - todayBreakSecs);
+    const remainingBreakHuman = formatHumanDuration(remainingBreakSecs);
+
+    const humanOvertime = formatHumanDuration(overtimeSecs, { showZeroHours: true });
+
+    // Progress percentages
+    const workPercent = Math.min(100, Math.round((todayWorkedSecs / targetWork) * 100));
+    const breakPercent = Math.min(100, Math.round((todayBreakSecs / targetBreak) * 100));
 
     return (
         <div className="today-summary-section">
             <div className="summary-section-header">
                 <span className="summary-title">TODAY'S SUMMARY</span>
+                {workPercent >= 100 && (
+                    <span className="target-reached-pill">Goal Met</span>
+                )}
             </div>
 
             <div className="summary-grid-cards">
                 {/* Worked Column */}
                 <div className="summary-metric-card work-card">
                     <div className="metric-header">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="metric-icon">
-                            <circle cx="12" cy="12" r="10" />
-                            <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        <span className="metric-label">Worked</span>
+                        <span className="metric-label">WORKED</span>
+                        <Clock size={13} strokeWidth={2.2} className="metric-icon text-brand" />
                     </div>
-                    <div className="metric-value">{formattedWorked}</div>
-                    <div className="metric-footer">Target: {formattedTargetWork}</div>
+                    <div className="metric-value">{humanWorked}</div>
+                    <div className="metric-footer">Target {targetWorkHuman}</div>
+                    <div className="metric-progress-track">
+                        <div className="metric-progress-fill bg-blue" style={{ width: `${workPercent}%` }} />
+                    </div>
                 </div>
 
                 {/* Break Column */}
                 <div className="summary-metric-card break-card">
                     <div className="metric-header">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="metric-icon">
-                            <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
-                            <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
-                            <line x1="6" y1="1" x2="6" y2="4" />
-                            <line x1="10" y1="1" x2="10" y2="4" />
-                            <line x1="14" y1="1" x2="14" y2="4" />
-                        </svg>
-                        <span className="metric-label">Break</span>
+                        <span className="metric-label">BREAK</span>
+                        <Coffee size={13} strokeWidth={2.2} className="metric-icon text-amber" />
                     </div>
-                    <div className="metric-value">{formattedBreak}</div>
+                    <div className="metric-value">
+                        {todayBreakSecs > 0 ? `${humanBreak} / ${targetBreakHuman}` : `0m / ${targetBreakHuman}`}
+                    </div>
                     <div className="metric-footer">
-                        {todayBreaksCount} of {maxBreaks} used
+                        {remainingBreakSecs > 0 ? `${remainingBreakHuman} left` : 'Break limit reached'}
+                    </div>
+                    <div className="metric-progress-track">
+                        <div className="metric-progress-fill bg-amber" style={{ width: `${breakPercent}%` }} />
                     </div>
                 </div>
 
                 {/* Overtime Column */}
                 <div className="summary-metric-card overtime-card">
                     <div className="metric-header">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="metric-icon">
-                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                        </svg>
-                        <span className="metric-label">Overtime</span>
+                        <span className="metric-label">OVERTIME</span>
+                        <Sparkles size={13} strokeWidth={2.2} className="metric-icon text-purple" />
                     </div>
-                    <div className="metric-value">{formattedOvertime}</div>
-                    <div className="metric-footer">{overtimeSecs > 0 ? 'Approved' : '0m logged'}</div>
+                    <div className="metric-value">{humanOvertime}</div>
+                    <div className="metric-footer">
+                        {overtimeSecs > 0 ? 'Approved' : 'None today'}
+                    </div>
+                    <div className="metric-progress-track">
+                        <div
+                            className="metric-progress-fill bg-purple"
+                            style={{ width: overtimeSecs > 0 ? '100%' : '0%' }}
+                        />
+                    </div>
                 </div>
             </div>
         </div>
     );
 }
+

@@ -1,24 +1,40 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useTimer } from '../hooks/useTimer';
-import { useAppTracker } from '../hooks/useAppTracker';
-import { useOvertimePrompt } from '../components/OvertimePromptProvider';
+/**
+ * src/pages/Dashboard.tsx
+ * ──────────────────────────────────────────────────────────
+ * Minimalist Yo HRMX Employee Time Tracker
+ * Matches the reference layout (Image 1):
+ *   - Top Greeting Header (Good evening, Raj Halder + Avatar)
+ *   - YO HRMX Branding
+ *   - Central Hero Work Card (Pulsing clock icon, Live bold timer, Location pill, 3 action cards)
+ *   - Bottom Utility Cards (View Dashboard, Logout)
+ */
 
-import EmployeeHeader from '../components/EmployeePopup/EmployeeHeader';
-import WorkStatusHero from '../components/EmployeePopup/WorkStatusHero';
-import TodaySummaryCards from '../components/EmployeePopup/TodaySummaryCards';
-import ActionButtons from '../components/EmployeePopup/ActionButtons';
-import QuickNavigation from '../components/EmployeePopup/QuickNavigation';
-import ProfileDrawer from '../components/EmployeePopup/ProfileDrawer';
-import LeaveSummaryModal from '../components/EmployeePopup/LeaveSummaryModal';
+import { useState } from 'react';
+import {
+    Building2,
+    ChevronRight,
+    Clock,
+    Coffee,
+    Home,
+    LayoutGrid,
+    Lock,
+    LogOut,
+    Play,
+    SlidersHorizontal,
+} from 'lucide-react';
+
+import { useTimer, formatDuration } from '../hooks/useTimer';
+import { useAppTracker } from '../hooks/useAppTracker';
+import { getFullAvatarUrl } from '../components/EmployeePopup/EmployeeHeader';
+import { WEB_APP_URL } from '../config';
+
+// Modals
 import ClockInModal from '../components/EmployeePopup/ClockInModal';
 import CheckoutWarningModal from '../components/EmployeePopup/CheckoutWarningModal';
 import ManageBreaksModal from '../components/EmployeePopup/ManageBreaksModal';
+import ProfileDrawer from '../components/EmployeePopup/ProfileDrawer';
+import LeaveSummaryModal from '../components/EmployeePopup/LeaveSummaryModal';
 import CalendarModal from '../components/EmployeePopup/CalendarModal';
-import { WEB_APP_URL } from '../config';
-
-
-
-
 
 const OFFICE_WORK_TARGET_SECS = 8 * 60 * 60;
 const OFFICE_BREAK_TARGET_SECS = 30 * 60;
@@ -30,19 +46,31 @@ interface DashboardProps {
     avatarUrl?: string | null;
 }
 
-export default function Dashboard({ view: _view, onLogout, userName = 'Employee', avatarUrl }: DashboardProps) {
+export default function Dashboard({
+    view: _view,
+    onLogout,
+    userName = 'Employee',
+    avatarUrl,
+}: DashboardProps) {
     const {
-        status, loading, actionLoading, error,
-        handleStart, handleBreak, handleStop, handleStartOvertime,
-        todayWorked, todayBreakSecs, activeBreakStartTime, todayBreaksCount, todayIdleSecs,
-        expectedWorkSecs, expectedBreakSecs, expectedActiveSecs, maxBreaks,
-        breakReminderAfterSecs, breakReminderRepeatSecs,
-        isOvertimeActive, overtimeSecs, overtimeStatus, overtimeAccepted,
-        currentShiftId, workLocation,
-        suspiciousActivityActive, suspiciousActivitySecs,
+        status,
+        loading,
+        actionLoading,
+        handleStart,
+        handleBreak,
+        handleStop,
+        todayWorked,
+        todayBreakSecs,
+        activeBreakStartTime,
+        todayBreaksCount,
+        maxBreaks,
+        expectedWorkSecs,
+        expectedBreakSecs,
+        isOvertimeActive,
+        overtimeSecs,
+        workLocation,
         breaks,
     } = useTimer();
-    const { requestOvertimeConfirmation } = useOvertimePrompt();
 
     // Modals state
     const [showLocationModal, setShowLocationModal] = useState(false);
@@ -50,288 +78,24 @@ export default function Dashboard({ view: _view, onLogout, userName = 'Employee'
     const [showProfileDrawer, setShowProfileDrawer] = useState(false);
     const [showLeaveModal, setShowLeaveModal] = useState(false);
     const [showCalendarModal, setShowCalendarModal] = useState(false);
-
-
-    // Checkout warning modal
     const [showWarning, setShowWarning] = useState(false);
     const [remainingSecs, setRemainingSecs] = useState(0);
     const [proceedingStop, setProceedingStop] = useState(false);
 
-    const fallbackOvertimePromptedShiftRef = useRef<string | null>(null);
+    // Background app tracking sync
+    useAppTracker();
 
-    // Break reminder modal / IPC
-    const [showBreakReminder, setShowBreakReminder] = useState(false);
-    const [nextBreakReminderAtSecs, setNextBreakReminderAtSecs] = useState<number | null>(null);
-    const trackedBreakStartRef = useRef<string | null>(null);
-    const statusRef = useRef(status);
-    const showBreakReminderRef = useRef(showBreakReminder);
-    const lastReminderTriggerAtRef = useRef(0);
-
-    const currentBreakSecs = status === 'on_break' && activeBreakStartTime
-        ? Math.max(0, Math.floor((Date.now() - new Date(activeBreakStartTime).getTime()) / 1000))
-        : 0;
+    const liveTimerSecs = isOvertimeActive ? overtimeSecs : todayWorked;
+    const formattedTimer = formatDuration(liveTimerSecs);
 
     const effectiveOfficeWorkTargetSecs = expectedWorkSecs > 0 ? expectedWorkSecs : OFFICE_WORK_TARGET_SECS;
     const effectiveOfficeBreakTargetSecs = expectedBreakSecs > 0 ? expectedBreakSecs : OFFICE_BREAK_TARGET_SECS;
     const breakLimitReached = status !== 'on_break' && todayBreaksCount >= maxBreaks;
 
-    useEffect(() => {
-        statusRef.current = status;
-    }, [status]);
-
-    useEffect(() => {
-        showBreakReminderRef.current = showBreakReminder;
-    }, [showBreakReminder]);
-
-    const showRendererBreakNotification = useCallback(async (breakSecs: number) => {
-        if (!('Notification' in window)) return false;
-
-        let permission = window.Notification.permission;
-        if (permission === 'default') {
-            permission = await window.Notification.requestPermission();
-        }
-
-        if (permission !== 'granted') {
-            console.warn('[BreakReminder] Renderer notification permission:', permission);
-            return false;
-        }
-
-        const iconUrl = new URL('icon.png', window.location.href).toString();
-        const notification = new window.Notification('You are still on break', {
-            body: `Your current break has been running for ${Math.floor(breakSecs / 60)} minutes.`,
-            icon: iconUrl,
-            silent: false,
-        });
-        notification.onclick = () => window.focus();
-        return true;
-    }, []);
-
-    const triggerBreakReminder = useCallback((breakSecs: number, notifyNative: boolean) => {
-        if (statusRef.current !== 'on_break') return;
-
-        const now = Date.now();
-        if (showBreakReminderRef.current && now - lastReminderTriggerAtRef.current < 1500) {
-            return;
-        }
-
-        lastReminderTriggerAtRef.current = now;
-        setShowBreakReminder(true);
-
-        const api = window.electronAPI;
-        api?.focusBreakReminder?.();
-        window.requestAnimationFrame(() => {
-            api?.focusBreakReminder?.();
-        });
-
-        if (notifyNative) {
-            api?.showBreakReminder?.(breakSecs, true);
-            void showRendererBreakNotification(breakSecs);
-        }
-    }, [showRendererBreakNotification]);
-
-    useEffect(() => {
-        const api = window.electronAPI;
-        if (!api?.onShowBreakReminderModal) return;
-
-        api.onShowBreakReminderModal?.((secs) => {
-            triggerBreakReminder(secs, false);
-        });
-
-        return () => {
-            api.removeShowBreakReminderModal?.();
-        };
-    }, [triggerBreakReminder]);
-
-    useEffect(() => {
-        if (status !== 'on_break' || !activeBreakStartTime) {
-            trackedBreakStartRef.current = null;
-            setShowBreakReminder(false);
-            setNextBreakReminderAtSecs(null);
-            lastReminderTriggerAtRef.current = 0;
-            return;
-        }
-
-        if (trackedBreakStartRef.current !== activeBreakStartTime) {
-            trackedBreakStartRef.current = activeBreakStartTime;
-            setShowBreakReminder(false);
-            setNextBreakReminderAtSecs(breakReminderAfterSecs);
-        }
-    }, [status, activeBreakStartTime, breakReminderAfterSecs]);
-
-    useEffect(() => {
-        if (
-            status !== 'on_break' ||
-            !activeBreakStartTime ||
-            showBreakReminder ||
-            nextBreakReminderAtSecs === null
-        ) {
-            return;
-        }
-
-        if (currentBreakSecs >= nextBreakReminderAtSecs) {
-            triggerBreakReminder(currentBreakSecs, true);
-        }
-    }, [status, activeBreakStartTime, currentBreakSecs, nextBreakReminderAtSecs, showBreakReminder, triggerBreakReminder]);
-
-    const dismissBreakReminder = () => {
-        setShowBreakReminder(false);
-        setNextBreakReminderAtSecs(currentBreakSecs + breakReminderRepeatSecs);
-        window.electronAPI?.closeBreakReminderPopup?.();
-    };
-
-    const resumeFromBreakReminder = async () => {
-        setShowBreakReminder(false);
-        setNextBreakReminderAtSecs(null);
-        window.electronAPI?.closeBreakReminderPopup?.();
-        await handleBreak();
-    };
-
-    useEffect(() => {
-        const api = window.electronAPI;
-        if (!api?.onBreakReminderDismiss || !api?.onBreakReminderResume) return;
-
-        api.onBreakReminderDismiss(() => {
-            dismissBreakReminder();
-        });
-        api.onBreakReminderResume(() => {
-            void resumeFromBreakReminder();
-        });
-
-        return () => {
-            api.removeBreakReminderActionListeners?.();
-        };
-    }, [dismissBreakReminder, resumeFromBreakReminder]);
-
-    const handleOvertimeDecision = useCallback(async (result: 'yes' | 'no') => {
-        if (result === 'no') {
-            return handleStop({ overtimeAccepted: false });
-        }
-        return handleStartOvertime();
-    }, [handleStop, handleStartOvertime]);
-
-    useEffect(() => {
-        const api = window.electronAPI;
-        if (!api?.onOvertimePromptNo || !api?.onOvertimePromptYes) return;
-
-        api.onOvertimePromptNo(() => {
-            void handleOvertimeDecision('no');
-        });
-        api.onOvertimePromptYes(() => {
-            void handleOvertimeDecision('yes');
-        });
-
-        return () => {
-            api.removeOvertimePromptListeners?.();
-        };
-    }, [handleOvertimeDecision]);
-
-    useEffect(() => {
-        if (!currentShiftId) {
-            fallbackOvertimePromptedShiftRef.current = null;
-        }
-    }, [currentShiftId]);
-
-    useEffect(() => {
-        if (
-            (status !== 'working' && status !== 'on_break') ||
-            workLocation !== 'office' ||
-            !currentShiftId ||
-            isOvertimeActive ||
-            overtimeStatus === 'active' ||
-            typeof overtimeAccepted === 'boolean' ||
-            fallbackOvertimePromptedShiftRef.current === currentShiftId ||
-            todayWorked < effectiveOfficeWorkTargetSecs ||
-            todayBreakSecs < effectiveOfficeBreakTargetSecs
-        ) {
-            return;
-        }
-
-        fallbackOvertimePromptedShiftRef.current = currentShiftId;
-        setShowBreakReminder(false);
-        setNextBreakReminderAtSecs(null);
-        window.electronAPI?.closeBreakReminderPopup?.();
-
-        const promptedShiftId = currentShiftId;
-        void (async () => {
-            const api = window.electronAPI;
-            if (api?.showOvertimePrompt) {
-                api.showOvertimePrompt(effectiveOfficeWorkTargetSecs, effectiveOfficeBreakTargetSecs);
-                return;
-            }
-            await requestOvertimeConfirmation(handleOvertimeDecision);
-        })().catch(() => {
-            if (fallbackOvertimePromptedShiftRef.current === promptedShiftId) {
-                fallbackOvertimePromptedShiftRef.current = null;
-            }
-        });
-    }, [
-        status,
-        workLocation,
-        currentShiftId,
-        isOvertimeActive,
-        overtimeStatus,
-        overtimeAccepted,
-        todayWorked,
-        todayBreakSecs,
-        effectiveOfficeWorkTargetSecs,
-        effectiveOfficeBreakTargetSecs,
-        requestOvertimeConfirmation,
-        handleOvertimeDecision,
-    ]);
-
-    // Handle Clock In
-    const handleClockInClick = () => setShowLocationModal(true);
-    const handleLocationSelect = (location: 'wfh' | 'office') => {
-        setShowLocationModal(false);
-        handleStart(location);
-    };
-
-    // Handle Clock Out
-    const handleCheckoutClick = () => {
-        if (isOvertimeActive) {
-            setShowWarning(false);
-            void handleStop();
-            return;
-        }
-
-        const activeSecs = Math.max(0, todayWorked - todayIdleSecs);
-        const workShortfall = Math.max(0, expectedWorkSecs - todayWorked);
-        const activeShortfall = Math.max(0, expectedActiveSecs - activeSecs);
-        const maxShortfall = Math.max(workShortfall, activeShortfall);
-
-        if (maxShortfall > 0) {
-            setRemainingSecs(maxShortfall);
-            setShowWarning(true);
-        } else {
-            handleStop();
-        }
-    };
-
-    const confirmStop = async () => {
-        setProceedingStop(true);
-        setShowWarning(false);
-        await handleStop();
-        setProceedingStop(false);
-    };
-
-    // Background app tracking sync
-    useAppTracker();
-
-    if (loading) {
-        return (
-            <div className="control-center-container loading-wrapper">
-                <div className="control-center-skeleton">
-                    <div className="skeleton-row header-skel" />
-                    <div className="skeleton-row hero-skel" />
-                    <div className="skeleton-grid summary-skel" />
-                    <div className="skeleton-row action-skel" />
-                </div>
-            </div>
-        );
-    }
-
-    const liveTimerSecs = isOvertimeActive ? overtimeSecs : todayWorked;
-    const hasCompletedTodayShift = status === 'stopped' && todayWorked > 0;
+    const currentBreakSecs =
+        status === 'on_break' && activeBreakStartTime
+            ? Math.max(0, Math.floor((Date.now() - new Date(activeBreakStartTime).getTime()) / 1000))
+            : 0;
 
     const openWebPage = (path: string) => {
         const api = (window as any).electronAPI;
@@ -345,74 +109,311 @@ export default function Dashboard({ view: _view, onLogout, userName = 'Employee'
         }
     };
 
+    const handleClockInClick = () => {
+        setShowLocationModal(true);
+    };
+
+    const handleLocationSelect = async (location: 'office' | 'wfh') => {
+        setShowLocationModal(false);
+        await handleStart(location);
+    };
+
+    const handleCheckoutClick = () => {
+        const workShortfall = Math.max(0, effectiveOfficeWorkTargetSecs - todayWorked);
+        if (workShortfall > 0) {
+            setRemainingSecs(workShortfall);
+            setShowWarning(true);
+        } else {
+            handleStop();
+        }
+    };
+
+    const confirmStop = async () => {
+        setProceedingStop(true);
+        setShowWarning(false);
+        await handleStop();
+        setProceedingStop(false);
+    };
+
+    // Greeting Calculation
+    const hour = new Date().getHours();
+    let greeting = 'Good morning';
+    if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
+    else if (hour >= 17) greeting = 'Good evening';
+
+    const fullAvatar = getFullAvatarUrl(avatarUrl);
+
+    if (loading) {
+        return (
+            <div className="tracker-view-wrapper" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                <div className="spinner" />
+            </div>
+        );
+    }
+
     return (
-        <div className="control-center-container">
-            {/* Header / Identity Section */}
-            <EmployeeHeader
-                userName={userName}
-                avatarUrl={avatarUrl}
-                designation="Software Developer"
-                teamName="YoForex Team"
-                role="Employee"
-                onOpenProfile={() => setShowProfileDrawer(true)}
-                onOpenLeave={() => setShowLeaveModal(true)}
-                onLogout={onLogout}
-                canLogout={status === 'stopped'}
-            />
+        <div className="tracker-view-wrapper">
+            <div>
+                {/* ═════════════════════════════════════════════════════════════════ */}
+                {/* 1. TOP GREETING & AVATAR ROW */}
+                {/* ═════════════════════════════════════════════════════════════════ */}
+                <div className="tracker-top-greeting-row">
+                    <div>
+                        <div className="tracker-greeting-title">
+                            {greeting},{' '}
+                            <span className="tracker-greeting-name">{userName}</span>
+                        </div>
+                        <div className="tracker-greeting-sub">
+                            Have a productive day ahead!
+                        </div>
+                    </div>
 
-            {/* Primary Work Status & Live Timer Section */}
-            <WorkStatusHero
-                status={status}
-                liveTimerSecs={liveTimerSecs}
-                isOvertimeActive={isOvertimeActive}
-                workLocation={workLocation}
-                suspiciousActivityActive={suspiciousActivityActive}
-                suspiciousActivitySecs={suspiciousActivitySecs}
-                error={error}
-                hasCompletedTodayShift={hasCompletedTodayShift}
-            />
+                    {/* Avatar with Online Dot */}
+                    <div
+                        onClick={() => setShowProfileDrawer(true)}
+                        className="tracker-avatar-wrap"
+                        title="Click to view profile"
+                    >
+                        {fullAvatar ? (
+                            <img src={fullAvatar} alt={userName} className="tracker-avatar-img" />
+                        ) : (
+                            <div className="tracker-avatar-fallback">
+                                {userName.charAt(0).toUpperCase()}
+                            </div>
+                        )}
+                        <span className="tracker-online-dot" />
+                    </div>
+                </div>
 
-            {/* Today Summary Metrics (Worked / Break / Overtime) */}
-            <TodaySummaryCards
-                todayWorkedSecs={todayWorked}
-                todayBreakSecs={todayBreakSecs}
-                overtimeSecs={overtimeSecs}
-                expectedWorkSecs={effectiveOfficeWorkTargetSecs}
-                expectedBreakSecs={effectiveOfficeBreakTargetSecs}
-                todayBreaksCount={todayBreaksCount}
-                maxBreaks={maxBreaks}
-            />
+                {/* ═════════════════════════════════════════════════════════════════ */}
+                {/* 2. CENTRAL HERO WORK CARD */}
+                {/* ═════════════════════════════════════════════════════════════════ */}
+                <div className="tracker-main-card">
+                    {/* Glowing Circular Icon */}
+                    <div className={`tracker-clock-icon-wrap ${
+                        status === 'working'
+                            ? 'tracker-clock-icon-working'
+                            : status === 'on_break'
+                            ? 'tracker-clock-icon-break'
+                            : 'tracker-clock-icon-stopped'
+                    }`}>
+                        {status === 'on_break' ? (
+                            <Coffee size={24} />
+                        ) : (
+                            <Clock size={24} />
+                        )}
+                    </div>
 
-            {/* Dynamic Primary & Contextual Action Buttons */}
-            <ActionButtons
-                status={status}
-                actionLoading={actionLoading}
-                breakLimitReached={breakLimitReached}
-                proceedingStop={proceedingStop}
-                onClockIn={handleClockInClick}
-                onTakeBreak={handleBreak}
-                onResumeBreak={handleBreak}
-                onClockOut={handleCheckoutClick}
-                onManageBreaks={() => setShowManageBreaksModal(true)}
-                hasCompletedTodayShift={hasCompletedTodayShift}
-            />
+                    {/* Status Pill Badge */}
+                    {status === 'working' ? (
+                        <div className="tracker-status-pill tracker-pill-working">
+                            <span className="online-indicator-dot" style={{ position: 'static', width: '6px', height: '6px' }} />
+                            <span>{isOvertimeActive ? 'OVERTIME ACTIVE' : 'WORKING'}</span>
+                        </div>
+                    ) : status === 'on_break' ? (
+                        <div className="tracker-status-pill tracker-pill-break">
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b' }} />
+                            <span>ON BREAK</span>
+                        </div>
+                    ) : (
+                        <div className="tracker-status-pill tracker-pill-stopped">
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#94a3b8' }} />
+                            <span>READY TO START</span>
+                        </div>
+                    )}
 
-            {/* Quick Navigation Footer Row */}
-            <QuickNavigation
-                onOpenDashboard={() => openWebPage('/dashboard')}
-                onOpenCalendar={() => setShowCalendarModal(true)}
-                onOpenLeave={() => setShowLeaveModal(true)}
-                onOpenProfile={() => setShowProfileDrawer(true)}
-            />
+                    {/* Bold Digital Live Timer */}
+                    <div className="tracker-live-digits">
+                        {formattedTimer}
+                    </div>
 
-            {/* Modals & Drawers */}
-            <CalendarModal
-                isOpen={showCalendarModal}
-                onClose={() => setShowCalendarModal(false)}
-                onOpenWebCalendar={() => openWebPage('/holiday')}
-            />
+                    {/* Subtitle Message */}
+                    <div className="tracker-shift-msg">
+                        {status === 'working'
+                            ? 'Shift in progress. Stay productive!'
+                            : status === 'on_break'
+                            ? 'On rest break. Recharge yourself!'
+                            : 'Shift not started. Ready to begin workday.'}
+                    </div>
 
+                    {/* Location Badge */}
+                    {status !== 'stopped' && (
+                        <div className="tracker-location-pill">
+                            {workLocation === 'wfh' ? (
+                                <>
+                                    <Home size={13} />
+                                    <span>Work From Home</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Building2 size={13} />
+                                    <span>Office Location</span>
+                                </>
+                            )}
+                        </div>
+                    )}
 
+                    {/* ── 3 Action Cards (Working & Break States) ── */}
+                    {status === 'working' && (
+                        <div className="tracker-actions-grid">
+                            {/* Card 1: Manage Breaks */}
+                            <button
+                                type="button"
+                                onClick={() => setShowManageBreaksModal(true)}
+                                className="tracker-action-card card-manage"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <SlidersHorizontal size={16} />
+                                </div>
+                                <span className="tracker-card-title">Manage Breaks</span>
+                                <span className="tracker-card-desc">View & claim</span>
+                            </button>
+
+                            {/* Card 2: Take Break */}
+                            <button
+                                type="button"
+                                onClick={() => handleBreak()}
+                                disabled={actionLoading || breakLimitReached}
+                                className="tracker-action-card card-break"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <Coffee size={16} />
+                                </div>
+                                <span className="tracker-card-title">
+                                    {breakLimitReached ? 'Max Breaks' : 'Take Break'}
+                                </span>
+                                <span className="tracker-card-desc">Start rest break</span>
+                            </button>
+
+                            {/* Card 3: Clock Out */}
+                            <button
+                                type="button"
+                                onClick={handleCheckoutClick}
+                                disabled={actionLoading || proceedingStop}
+                                className="tracker-action-card card-clockout"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <LogOut size={16} />
+                                </div>
+                                <span className="tracker-card-title">Clock Out</span>
+                                <span className="tracker-card-desc">End your shift</span>
+                            </button>
+                        </div>
+                    )}
+
+                    {status === 'on_break' && (
+                        <div className="tracker-actions-grid">
+                            {/* Card 1: Manage Breaks */}
+                            <button
+                                type="button"
+                                onClick={() => setShowManageBreaksModal(true)}
+                                className="tracker-action-card card-manage"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <SlidersHorizontal size={16} />
+                                </div>
+                                <span className="tracker-card-title">Manage Breaks</span>
+                                <span className="tracker-card-desc">View & claim</span>
+                            </button>
+
+                            {/* Card 2: Resume Work */}
+                            <button
+                                type="button"
+                                onClick={() => handleBreak()}
+                                disabled={actionLoading}
+                                className="tracker-action-card card-resume"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <Play size={16} fill="currentColor" />
+                                </div>
+                                <span className="tracker-card-title">Resume Work</span>
+                                <span className="tracker-card-desc">Continue shift</span>
+                            </button>
+
+                            {/* Card 3: Clock Out */}
+                            <button
+                                type="button"
+                                onClick={handleCheckoutClick}
+                                disabled={actionLoading || proceedingStop}
+                                className="tracker-action-card card-clockout"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <LogOut size={16} />
+                                </div>
+                                <span className="tracker-card-title">Clock Out</span>
+                                <span className="tracker-card-desc">End your shift</span>
+                            </button>
+                        </div>
+                    )}
+
+                    {status === 'stopped' && (
+                        <div style={{ width: '100%', marginTop: '8px' }}>
+                            <button
+                                type="button"
+                                onClick={handleClockInClick}
+                                disabled={actionLoading}
+                                className="tracker-clockin-full-btn"
+                            >
+                                <Play size={16} fill="currentColor" />
+                                <span>Clock In Workday</span>
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* ═════════════════════════════════════════════════════════════════ */}
+                {/* 4. BOTTOM UTILITY CARDS ROW */}
+                {/* ═════════════════════════════════════════════════════════════════ */}
+                <div className="tracker-bottom-grid">
+                    {/* View Dashboard Card */}
+                    <button
+                        type="button"
+                        onClick={() => openWebPage('/dashboard')}
+                        className="tracker-nav-card"
+                    >
+                        <div className="tracker-nav-left">
+                            <div className="tracker-nav-icon icon-emerald-soft">
+                                <LayoutGrid size={16} />
+                            </div>
+                            <div>
+                                <div className="tracker-nav-title">View Dashboard</div>
+                                <div className="tracker-nav-desc">Summary & stats</div>
+                            </div>
+                        </div>
+                        <ChevronRight size={15} color="#94a3b8" />
+                    </button>
+
+                    {/* Logout Card */}
+                    <button
+                        type="button"
+                        onClick={onLogout}
+                        disabled={status !== 'stopped'}
+                        className="tracker-nav-card"
+                        title={status !== 'stopped' ? 'Please clock out before logging out' : 'Sign out of your account'}
+                    >
+                        <div className="tracker-nav-left">
+                            <div className="tracker-nav-icon icon-slate-soft">
+                                <LogOut size={16} />
+                            </div>
+                            <div>
+                                <div className="tracker-nav-title">Logout</div>
+                                <div className="tracker-nav-desc">
+                                    {status === 'stopped' ? 'Sign out' : 'Clock out first'}
+                                </div>
+                            </div>
+                        </div>
+                        {status !== 'stopped' ? (
+                            <Lock size={14} color="#cbd5e1" />
+                        ) : (
+                            <ChevronRight size={15} color="#94a3b8" />
+                        )}
+                    </button>
+                </div>
+            </div>
+
+            {/* ═════════════════════════════════════════════════════════════════ */}
+            {/* MODALS */}
+            {/* ═════════════════════════════════════════════════════════════════ */}
             <ClockInModal
                 isOpen={showLocationModal}
                 onSelect={handleLocationSelect}
@@ -446,11 +447,19 @@ export default function Dashboard({ view: _view, onLogout, userName = 'Employee'
                 designation="Software Developer"
                 role="Employee"
                 expectedWorkSecs={effectiveOfficeWorkTargetSecs}
+                onOpenLeave={() => setShowLeaveModal(true)}
+                onOpenCalendar={() => setShowCalendarModal(true)}
             />
 
             <LeaveSummaryModal
                 isOpen={showLeaveModal}
                 onClose={() => setShowLeaveModal(false)}
+            />
+
+            <CalendarModal
+                isOpen={showCalendarModal}
+                onClose={() => setShowCalendarModal(false)}
+                onOpenWebCalendar={() => openWebPage('/holiday')}
             />
         </div>
     );

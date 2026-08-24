@@ -1,9 +1,11 @@
+import { Coffee, LogOut, Play, SlidersHorizontal } from 'lucide-react';
 
 interface ActionButtonsProps {
     status: 'stopped' | 'working' | 'on_break';
     actionLoading: boolean;
     breakLimitReached: boolean;
     proceedingStop: boolean;
+    remainingBreakSecs?: number;
     onClockIn: () => void;
     onTakeBreak: () => void;
     onResumeBreak: () => void;
@@ -32,9 +34,7 @@ export default function ActionButtons({
                     onClick={onClockIn}
                     disabled={actionLoading}
                 >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
+                    <Play size={16} strokeWidth={2.5} fill="currentColor" />
                     <span>{hasCompletedTodayShift ? 'Clock In Again' : 'Clock In Workday'}</span>
                 </button>
             </div>
@@ -44,75 +44,74 @@ export default function ActionButtons({
     if (status === 'on_break') {
         return (
             <div className="action-control-group on-break-actions">
-                <button
-                    className="btn-primary-action resume-btn"
-                    onClick={onResumeBreak}
-                    disabled={actionLoading}
-                >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
-                    <span>Resume Work</span>
-                </button>
+                <div className="flex-buttons-group">
+                    <button
+                        className="btn-action btn-emerald-primary"
+                        onClick={onResumeBreak}
+                        disabled={actionLoading}
+                    >
+                        <Play size={15} strokeWidth={2.5} fill="currentColor" />
+                        <span>Resume Work</span>
+                    </button>
 
-                <button
-                    className="btn-secondary-action manage-breaks-btn"
-                    onClick={onManageBreaks}
-                >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-                    </svg>
-                    <span>Manage Breaks</span>
-                </button>
+                    <button
+                        className="btn-action btn-purple-outline"
+                        onClick={onClockOut}
+                        disabled={actionLoading || proceedingStop}
+                    >
+                        <LogOut size={14} strokeWidth={2.2} />
+                        <span>Clock Out</span>
+                    </button>
+                </div>
+
+                <div className="tertiary-action-row">
+                    <button
+                        type="button"
+                        className="btn-tertiary-manage-breaks"
+                        onClick={onManageBreaks}
+                    >
+                        <SlidersHorizontal size={12} strokeWidth={2} />
+                        <span>View & Claim Break Credits</span>
+                    </button>
+                </div>
             </div>
         );
     }
 
-    // WORKING state
+    // WORKING state: Full-width 50/50 Take a Break + Clock Out
     return (
         <div className="action-control-group working-actions">
-            <div className="primary-action-row">
+            <div className="flex-buttons-group">
                 <button
-                    className="btn-action take-break-btn"
+                    className="btn-action btn-orange-primary"
                     onClick={onTakeBreak}
                     disabled={actionLoading || breakLimitReached}
-                    title={breakLimitReached ? 'Maximum daily break count reached' : 'Take a short break'}
+                    title={breakLimitReached ? 'Maximum daily break count reached' : 'Take a rest break'}
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
-                        <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
-                        <line x1="6" y1="1" x2="6" y2="4" />
-                        <line x1="10" y1="1" x2="10" y2="4" />
-                        <line x1="14" y1="1" x2="14" y2="4" />
-                    </svg>
-                    <span>{breakLimitReached ? 'Max Breaks' : 'Take Break'}</span>
+                    <Coffee size={15} strokeWidth={2.2} />
+                    <span>{breakLimitReached ? 'Max Breaks' : 'Take a Break'}</span>
                 </button>
 
                 <button
-                    className="btn-action clock-out-btn"
+                    className="btn-action btn-outline-action"
                     onClick={onClockOut}
                     disabled={actionLoading || proceedingStop}
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
+                    <LogOut size={14} strokeWidth={2.2} />
                     <span>Clock Out</span>
                 </button>
             </div>
 
-            <button
-                className="btn-tertiary-manage-breaks"
-                onClick={onManageBreaks}
-            >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-                </svg>
-                <span>View & Claim Break Credits</span>
-            </button>
+            <div className="tertiary-action-row">
+                <button
+                    type="button"
+                    className="btn-tertiary-manage-breaks"
+                    onClick={onManageBreaks}
+                >
+                    <SlidersHorizontal size={12} strokeWidth={2} />
+                    <span>View & Claim Break Credits</span>
+                </button>
+            </div>
         </div>
     );
 }

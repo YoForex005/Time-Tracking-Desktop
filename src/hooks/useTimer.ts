@@ -175,6 +175,58 @@ export function formatDuration(seconds: number): string {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+/** Format seconds as human-readable time like "7h 42m", "42m", or "0h 00m" */
+export function formatHumanDuration(seconds: number, options?: { showZeroHours?: boolean }): string {
+    if (!seconds || seconds <= 0) {
+        return options?.showZeroHours ? '0h 00m' : '0m';
+    }
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+
+    if (h > 0) {
+        return `${h}h ${String(m).padStart(2, '0')}m`;
+    }
+    return `${m}m`;
+}
+
+/** Compute formatted clock time like "07:00 PM" based on shift start and target work + break duration */
+export function calculateExpectedClockOut(
+    shiftStartTime: string | null | undefined,
+    targetWorkSecs: number = 8 * 3600,
+    targetBreakSecs: number = 3600
+): { clockOutTime: string; remainingSecs: number; targetReached: boolean } {
+    if (!shiftStartTime) {
+        return { clockOutTime: '--:--', remainingSecs: targetWorkSecs, targetReached: false };
+    }
+
+    const startTimestamp = new Date(shiftStartTime).getTime();
+    if (isNaN(startTimestamp)) {
+        return { clockOutTime: '--:--', remainingSecs: targetWorkSecs, targetReached: false };
+    }
+
+    // Expected duration = target work + target break
+    const totalRequiredMs = (targetWorkSecs + targetBreakSecs) * 1000;
+    const expectedEndTimestamp = startTimestamp + totalRequiredMs;
+    const now = Date.now();
+    const remainingMs = expectedEndTimestamp - now;
+    const remainingSecs = Math.max(0, Math.floor(remainingMs / 1000));
+
+    const expectedDate = new Date(expectedEndTimestamp);
+    let hours = expectedDate.getHours();
+    const minutes = expectedDate.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // 0 should be 12
+    const strMinutes = String(minutes).padStart(2, '0');
+
+    return {
+        clockOutTime: `${hours}:${strMinutes} ${ampm}`,
+        remainingSecs,
+        targetReached: remainingSecs === 0,
+    };
+}
+
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useTimer() {
@@ -897,6 +949,7 @@ export function useTimer() {
         breakReminderAfterSecs,
         breakReminderRepeatSecs,
         currentShiftId: currentShift?.id ?? null,
+        currentShiftStartTime: currentShift?.startTime ?? null,
         workLocation: currentShift?.workLocation ?? 'office',
         // Suspicious activity (observe-only — does NOT affect working time)
         suspiciousActivityActive,
