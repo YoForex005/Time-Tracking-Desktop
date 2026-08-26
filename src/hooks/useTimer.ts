@@ -272,12 +272,7 @@ export function useTimer() {
     const [suspiciousActivityStartedAt, setSuspiciousActivityStartedAt] = useState<string | null>(null);
     const [suspiciousActivitySecs, setSuspiciousActivitySecs] = useState(0);
 
-    // ── Screen Lock state ─────────────────────────────────────────────────────
-    // `lockBreakRef` = true when the current break was automatically started by
-    // a screen lock event. Only in this case do we auto-resume work on unlock.
-    // Manual breaks (user clicked "Take Break") leave this as false, so they
-    // are NEVER auto-ended on unlock.
-    const lockBreakRef = useRef(false);
+    // ── Screen Lock state (informational) ────────────────────────────────────
 
     // ── Tick: forces re-render every second when shift is active ──────────────
     const [tick, setTick] = useState(0);
@@ -624,92 +619,47 @@ export function useTimer() {
     }, [suspiciousActivityActive, suspiciousActivityStartedAt]);
 
     // ── Screen Lock / Unlock Listeners (Electron IPC) ─────────────────────────
-    // When Win+L is pressed:
-    //   • If working → automatically start a break + set lockBreakRef flag
-    // When screen unlocks:
-    //   • If lockBreakRef is set → automatically end the break + clear flag
-    //   • Otherwise (manual break) → do nothing
+    // Informational logging only — breaks are manually controlled by the user.
 
     useEffect(() => {
         const api = window.electronAPI;
         if (!api) return;
 
-        api.onScreenLocked(async () => {
+        api.onScreenLocked(() => {
             console.log('[ScreenLock] Screen locked');
-
-            // Only auto-break if the user is currently working (not already on break or stopped)
-            if (status !== 'working') return;
-
-            // Close any open idle session first — the break covers this time now
-            setIdleSessionStartTime(null);
-            await endIdleSession().catch(() => { /* No idle session open — safe to ignore */ });
-
-            // Mark this break as lock-initiated so we know to auto-resume on unlock
-            lockBreakRef.current = true;
-
-            console.log('[ScreenLock] Auto-starting break due to screen lock');
-            try {
-                await toggleBreak();
-                await fetchStatus();
-                await fetchHistory();
-            } catch (e) {
-                console.warn('[ScreenLock] Failed to start break on screen lock:', e);
-                lockBreakRef.current = false; // reset flag if the API call failed
-            }
         });
 
         api.onScreenUnlocked(async () => {
-            console.log('[ScreenLock] Screen unlocked');
-
-            // Only auto-resume if THIS break was started by a screen lock
-            if (!lockBreakRef.current) {
-                console.log('[ScreenLock] Break was not lock-initiated — leaving break running');
-                return;
-            }
-
-            // Clear the flag before the API call to avoid double-triggering
-            lockBreakRef.current = false;
-
-            console.log('[ScreenLock] Auto-ending break due to screen unlock');
-            try {
-                await toggleBreak();
-                await fetchStatus();
-                await fetchHistory();
-            } catch (e) {
-                console.warn('[ScreenLock] Failed to end break on screen unlock:', e);
-            }
+            console.log('[ScreenLock] Screen unlocked — re-syncing status');
+            await fetchStatus();
+            await fetchHistory();
+            await fetchIdleSecs();
         });
 
         return () => api.removeScreenListeners();
-    }, [status, fetchStatus, fetchHistory]);
+    }, [fetchStatus, fetchHistory, fetchIdleSecs]);
 
     // ── Sleep / Resume Listeners (Electron IPC) ────────────────────────────────
-    // Main.js already called the backend API before the network dropped.
-    // Here the renderer just re-syncs its UI state from the backend.
-    //
-    // ⚠️ INDEPENDENT from shutdown → disconnect-intent → auto-checkout.
+    // System suspend tracks idle time automatically. On wake, re-sync status and idle.
 
     useEffect(() => {
         const api = window.electronAPI;
         if (!api) return;
 
         api.onSleepBreakStarted(async () => {
-            console.log('[Sleep] Main process started break on sleep — re-syncing UI');
-            await fetchStatus();
-            await fetchHistory();
+            console.log('[Sleep] System suspended');
         });
 
         api.onSleepBreakEnded(async (ok: boolean) => {
-            console.log(`[Sleep] Main process ended break on wake (ok=${ok}) — re-syncing UI`);
+            console.log(`[Sleep] System resumed (ok=${ok}) — re-syncing UI`);
             // Use retry: network may take a few seconds to reconnect after sleep.
-            // Without retry the first fetch fails and the UI shows NOT CLOCKED IN.
             await fetchStatusWithRetry(6, 2000);
             await fetchHistory();
             await fetchIdleSecs();
         });
 
         return () => api.removeSleepListeners();
-    }, [fetchStatus, fetchStatusWithRetry, fetchHistory, fetchIdleSecs]);
+    }, [fetchStatusWithRetry, fetchHistory, fetchIdleSecs]);
 
     // ── Computed Stats ────────────────────────────────────────────────────────
     // Recalculated on every render (every second when shift is active)

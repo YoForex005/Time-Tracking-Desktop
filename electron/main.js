@@ -170,7 +170,7 @@ let tray = null;                    // system tray icon — keeps app alive afte
 // without waiting for the renderer (which may be too slow before network drops).
 // Updated by the renderer via 'update-shift-status' IPC whenever status changes.
 let currentShiftStatus = 'stopped'; // 'stopped' | 'working' | 'on_break'
-let sleepBreakStarted = false;      // true if THIS sleep triggered a break
+let sleepIdleStarted = false;       // true if system suspend opened an idle session
 let breakReminderTimeout = null;
 let activeBreakReminder = null;
 let breakReminderWindow = null;
@@ -346,33 +346,7 @@ function syncHeartbeatLoop() {
     console.log('[Heartbeat] Main-process heartbeat started');
 }
 
-/**
- * Calls the break-toggle endpoint directly from main.js.
- * Used on sleep/resume so the request fires BEFORE the network drops.
- * Returns true if the request succeeded.
- */
-async function sendBreakToggle(context) {
-    if (!sessionAuthToken) return false;
-    try {
-        await axios.post(
-            `${API_BASE}/time/break`,
-            buildClientTimestampPayload(),
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${sessionAuthToken}`,
-                },
-                timeout: 4000,
-            }
-        );
-        console.log(`[Sleep] Break toggle sent from main process (${context})`);
-        return true;
-    } catch (err) {
-        const message = err && err.message ? err.message : 'unknown error';
-        console.warn(`[Sleep] Failed to toggle break (${context}):`, message);
-        return false;
-    }
-}
+
 
 // ── OTA Updates (Configuration) ──────────────────────────────────────────────
 
@@ -1552,10 +1526,8 @@ function startIdlePolling() {
         // Only run if the window exists and is ready
         if (!mainWindow || mainWindow.isDestroyed()) return;
 
-        // Suppress idle tracking while the screen is locked.
-        // The break (started by screen-lock) already accounts for this time.
-        // Counting idle on top of a lock-break would double-count inactivity.
-        if (isScreenLocked) return;
+        // When user is already on a manual break, pause idle polling
+        if (currentShiftStatus === 'on_break') return;
 
         const idleSecs = powerMonitor.getSystemIdleTime();
         const inputIdle = idleSecs >= IDLE_THRESHOLD_SECS;
@@ -1596,64 +1568,23 @@ function startIdlePolling() {
 
 /**
  * Listens for OS-level screen lock and unlock events.
- *
- * Behaviour:
- *   - Screen LOCKED  → notify renderer (it will start a break if user is working)
- *   - Screen UNLOCKED → notify renderer (it will end the break if it was lock-initiated)
- *
- * We also flip `isScreenLocked` so the idle poller knows to pause
- * itself — no point tracking idle time while the user is already on a
- * lock-break.
+ * With manual break tracking, screen locking does NOT start/stop breaks automatically.
+ * Idle detection continues to track away-from-keyboard time.
  */
 function startScreenLockDetection() {
-    powerMonitor.on('lock-screen', async () => {
+    powerMonitor.on('lock-screen', () => {
         isScreenLocked = true;
         Sentry.addBreadcrumb({ category: 'screen-lock', message: 'Screen locked', level: 'info' });
-
-        // If the user was idle when they locked, clear that state.
-        // The lock-break will cover this period going forward.
-        if (isUserIdle) {
-            isUserIdle = false;
-            // Tell renderer to end the idle session cleanly before break starts
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('idle-end');
-            }
-        }
-
-        // ── Direct break API call from main.js (like sleep/suspend) ───────
-        // Previously this was handled by the renderer, which could miss the
-        // event if it was crashed or frozen. Now main.js calls directly.
-        if (currentShiftStatus === 'working') {
-            const ok = await sendBreakToggle('screen-lock');
-            if (ok) {
-                console.log('[ScreenLock] Break started via direct API call');
-            } else {
-                console.warn('[ScreenLock] Break API call failed — falling back to renderer');
-            }
-        } else {
-            console.log(`[ScreenLock] Status is '${currentShiftStatus}' — skipping lock-break`);
-        }
-
-        // Also notify renderer so the UI reflects the state change
+        console.log('[ScreenLock] Screen locked');
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('screen-locked');
         }
     });
 
-    powerMonitor.on('unlock-screen', async () => {
+    powerMonitor.on('unlock-screen', () => {
         isScreenLocked = false;
         Sentry.addBreadcrumb({ category: 'screen-lock', message: 'Screen unlocked', level: 'info' });
-
-        // ── End lock-break directly from main.js ─────────────────────────
-        if (currentShiftStatus === 'on_break') {
-            const ok = await sendBreakToggle('screen-unlock');
-            if (ok) {
-                console.log('[ScreenLock] Break ended via direct API call');
-            } else {
-                console.warn('[ScreenLock] Break end API call failed — renderer will re-sync');
-            }
-        }
-
+        console.log('[ScreenLock] Screen unlocked');
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('screen-unlocked');
         }
@@ -2135,31 +2066,19 @@ app.whenReady().then(() => {
     });
 
     // ── Sleep / Resume Detection ─────────────────────────────────────────────
-    // IMPORTANT: These are SEPARATE from 'shutdown':
-    //   shutdown → disconnect-intent → 5-min grace → auto clock-out (unchanged)
-    //   suspend  → break toggle called DIRECTLY via axios (no renderer involvement)
-    //   resume   → break toggle called DIRECTLY via axios to end the sleep break
-    //
-    // We call the API from main.js (not the renderer) because the network
-    // is still available at this point, whereas the renderer's async HTTP
-    // call often fails after the network drops during suspend.
+    // IMPORTANT: Breaks are strictly manual. When the system sleeps, we open
+    // an idle session directly so sleep time is recorded as idle time rather
+    // than active work or an unintended automatic break.
     powerMonitor.on('suspend', async () => {
         console.log('[Sleep] System suspending');
         Sentry.addBreadcrumb({ category: 'sleep', message: 'System suspending', level: 'info' });
 
-        // Only auto-break if the user is actively working and below limit.
         if (currentShiftStatus !== 'working') {
-            console.log(`[Sleep] Status is '${currentShiftStatus}' — skipping sleep break`);
+            console.log(`[Sleep] Status is '${currentShiftStatus}' — skipping sleep idle tracking`);
             return;
         }
 
-        const ok = await sendBreakToggle('suspend');
-        sleepBreakStarted = ok; // only set flag if the API call succeeded
-
-        // ── Fallback: if break was rejected (maxBreaks exhausted), open an
-        // idle session so sleep time is not silently credited as work. ─────
-        if (!ok && sessionAuthToken) {
-            console.log('[Sleep] Break rejected (maxBreaks?) — opening idle session as fallback');
+        if (sessionAuthToken) {
             try {
                 const eventTime = new Date();
                 const startTime = new Date(eventTime.getTime() - 1000); // 1s ago
@@ -2177,15 +2096,15 @@ app.whenReady().then(() => {
                         timeout: 4000,
                     }
                 );
-                console.log('[Sleep] Idle session opened as fallback for sleep');
+                sleepIdleStarted = true;
+                console.log('[Sleep] Idle session opened for suspend period');
             } catch (idleErr) {
                 const msg = idleErr && idleErr.message ? idleErr.message : 'unknown';
-                console.warn('[Sleep] Failed to open idle fallback:', msg);
+                console.warn('[Sleep] Failed to open idle session on suspend:', msg);
             }
         }
 
-        // Also tell the renderer so the UI reflects the break immediately
-        if (ok && mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('sleep-break-started');
         }
     });
@@ -2194,34 +2113,30 @@ app.whenReady().then(() => {
         console.log('[Sleep] System resumed from sleep');
         Sentry.addBreadcrumb({ category: 'sleep', message: 'System resumed', level: 'info' });
 
-        if (!sleepBreakStarted) {
-            // If we opened an idle fallback instead of a break, close it now
-            if (sessionAuthToken) {
-                try {
-                    await axios.post(
-                        `${API_BASE}/time/idle/end`,
-                        buildClientTimestampPayload(),
-                        {
-                            headers: {
-                                'Content-Type': 'application/json',
-                                Authorization: `Bearer ${sessionAuthToken}`,
-                            },
-                            timeout: 4000,
-                        }
-                    );
-                    console.log('[Sleep] Closed idle fallback session on resume');
-                } catch { /* ignore — idle session may not exist */ }
+        if (sleepIdleStarted && sessionAuthToken) {
+            sleepIdleStarted = false;
+            try {
+                await axios.post(
+                    `${API_BASE}/time/idle/end`,
+                    buildClientTimestampPayload(),
+                    {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${sessionAuthToken}`,
+                        },
+                        timeout: 4000,
+                    }
+                );
+                console.log('[Sleep] Closed idle session on resume');
+            } catch (err) {
+                const msg = err && err.message ? err.message : 'unknown';
+                console.warn('[Sleep] Failed to close idle session on resume:', msg);
             }
-            console.log('[Sleep] No sleep break was started — nothing to end');
-            return;
         }
-
-        sleepBreakStarted = false;
-        const ok = await sendBreakToggle('resume');
 
         // Tell renderer to re-sync status from backend
         if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('sleep-break-ended', ok);
+            mainWindow.webContents.send('sleep-break-ended', true);
         }
     });
 
