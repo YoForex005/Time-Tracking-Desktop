@@ -44,6 +44,11 @@ interface DashboardProps {
     onLogout: () => void;
     userName?: string;
     avatarUrl?: string | null;
+    email?: string;
+    role?: string;
+    designation?: string;
+    teamName?: string;
+    idleThresholdSecs?: number;
 }
 
 export default function Dashboard({
@@ -51,6 +56,11 @@ export default function Dashboard({
     onLogout,
     userName = 'Employee',
     avatarUrl,
+    email = 'employee@yoforex.net',
+    role = 'Employee',
+    designation = 'Employee',
+    teamName = 'YoForex Team',
+    idleThresholdSecs = 60,
 }: DashboardProps) {
     const {
         status,
@@ -163,8 +173,26 @@ export default function Dashboard({
                             {greeting},{' '}
                             <span className="tracker-greeting-name">{userName}</span>
                         </div>
-                        <div className="tracker-greeting-sub">
-                            Have a productive day ahead!
+                        <div className="tracker-greeting-sub" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                            <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '1px 8px',
+                                borderRadius: '999px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                background: '#f0fdf4',
+                                color: '#166534',
+                                border: '1px solid #bbf7d0',
+                                letterSpacing: '0.02em',
+                            }}>
+                                {role || designation || 'Employee'}
+                            </span>
+                            {teamName && (
+                                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600 }}>
+                                    • {teamName}
+                                </span>
+                            )}
                         </div>
                     </div>
 
@@ -442,10 +470,11 @@ export default function Dashboard({
                 onClose={() => setShowProfileDrawer(false)}
                 userName={userName}
                 avatarUrl={avatarUrl}
-                email="employee@yoforex.net"
-                teamName="YoForex Team"
-                designation="Software Developer"
-                role="Employee"
+                email={email}
+                teamName={teamName}
+                designation={role || designation || 'Employee'}
+                role={role || designation || 'Employee'}
+                idleThresholdSecs={idleThresholdSecs}
                 expectedWorkSecs={effectiveOfficeWorkTargetSecs}
                 onOpenLeave={() => setShowLeaveModal(true)}
                 onOpenCalendar={() => setShowCalendarModal(true)}

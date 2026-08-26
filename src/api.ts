@@ -311,6 +311,39 @@ export function subscribeToThresholdEvents(
     return () => source.close();
 }
 
+/**
+ * Open a Server-Sent Events connection to receive real-time profile updates (role, team, avatar, name).
+ *
+ * The backend pushes a `user-profile-updated` event every time an admin updates this user in the Admin Portal.
+ *
+ * @param onProfileChange  Called with updated profile fields
+ * @returns                Cleanup function — call on component unmount
+ */
+export function subscribeToProfileEvents(
+    onProfileChange: (profile: Record<string, unknown>) => void
+): () => void {
+    const token = getToken();
+    if (!token) return () => { };
+
+    const url = `${API_BASE}/time/events?token=${encodeURIComponent(token)}`;
+    const source = new EventSource(url);
+
+    source.addEventListener('user-profile-updated', (e: MessageEvent) => {
+        try {
+            const profile = JSON.parse(e.data);
+            if (profile && typeof profile === 'object') {
+                onProfileChange(profile);
+            }
+        } catch { /* malformed event — ignore */ }
+    });
+
+    source.onerror = () => {
+        // EventSource will auto-reconnect
+    };
+
+    return () => source.close();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Break Override / Claim API
 // ─────────────────────────────────────────────────────────────────────────────

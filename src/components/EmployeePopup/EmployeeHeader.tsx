@@ -27,8 +27,8 @@ export const getFullAvatarUrl = (avatarUrl?: string | null) => {
 export default function EmployeeHeader({
     userName,
     avatarUrl,
-    designation = 'Software Developer',
-    teamName = 'YoForex Team',
+    designation = 'Employee',
+    teamName = 'General Team',
     role = 'Employee',
     onOpenProfile,
     onOpenLeave,

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { CalendarDays, Palmtree } from 'lucide-react';
 import { getFullAvatarUrl } from './EmployeeHeader';
 import { getLeaveBalance, type LeaveBalanceInfo } from '../../api';
+import { API_BASE } from '../../config';
 
 interface ProfileDrawerProps {
     isOpen: boolean;
@@ -21,28 +22,124 @@ interface ProfileDrawerProps {
 export default function ProfileDrawer({
     isOpen,
     onClose,
-    userName,
-    avatarUrl,
-    email = 'raj@yoforex.net',
-    teamName = 'Engineering',
-    designation = 'Software Developer',
-    role = 'Employee',
-    idleThresholdSecs = 60,
+    userName: initialUserName,
+    avatarUrl: initialAvatarUrl,
+    email: initialEmail = 'employee@yoforex.net',
+    teamName: initialTeamName = 'Operations Team',
+    designation: initialDesignation = 'Employee',
+    role: initialRole = 'Employee',
+    idleThresholdSecs: initialIdleThresholdSecs = 60,
     expectedWorkSecs = 28800,
     onOpenLeave,
     onOpenCalendar,
 }: ProfileDrawerProps) {
     const [leaveInfo, setLeaveInfo] = useState<LeaveBalanceInfo | null>(null);
+    const [dynamicProfile, setDynamicProfile] = useState<{
+        userName: string;
+        avatarUrl?: string | null;
+        email: string;
+        teamName: string;
+        role: string;
+        designation: string;
+        idleThresholdSecs: number;
+    }>({
+        userName: initialUserName,
+        avatarUrl: initialAvatarUrl,
+        email: initialEmail,
+        teamName: initialTeamName,
+        role: initialRole,
+        designation: initialDesignation,
+        idleThresholdSecs: initialIdleThresholdSecs,
+    });
 
     useEffect(() => {
         if (!isOpen) return;
+
+        // Sync fresh leave balance
         getLeaveBalance()
             .then(data => setLeaveInfo(data))
             .catch(() => {});
-    }, [isOpen]);
+
+        // Fetch fresh dynamic profile from /auth/me
+        const token = localStorage.getItem('wf_token');
+        if (token) {
+            fetch(`${API_BASE}/auth/me`, {
+                headers: { Authorization: `Bearer ${token}` }
+            })
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                    if (data?.user) {
+                        const u = data.user;
+                        const effRole = u.role || u.roleName || u.designation || 'Employee';
+                        setDynamicProfile({
+                            userName: u.name || initialUserName,
+                            avatarUrl: u.avatarUrl ?? initialAvatarUrl,
+                            email: u.email || initialEmail,
+                            teamName: u.teamName || initialTeamName,
+                            role: effRole,
+                            designation: effRole,
+                            idleThresholdSecs: u.idleThresholdSecs ?? initialIdleThresholdSecs,
+                        });
+                    }
+                })
+                .catch(() => {});
+        }
+    }, [isOpen, initialUserName, initialAvatarUrl, initialEmail, initialTeamName, initialRole, initialDesignation, initialIdleThresholdSecs]);
+
+    const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+    const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const token = localStorage.getItem('wf_token');
+        if (!token) return;
+
+        try {
+            setUploadingAvatar(true);
+            const formData = new FormData();
+            formData.append('avatar', file);
+
+            const res = await fetch(`${API_BASE}/auth/avatar`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: formData,
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                if (data.avatarUrl) {
+                    setDynamicProfile(prev => ({
+                        ...prev,
+                        avatarUrl: data.avatarUrl,
+                    }));
+                    const saved = localStorage.getItem('wf_user');
+                    if (saved) {
+                        try {
+                            const parsed = JSON.parse(saved);
+                            parsed.avatarUrl = data.avatarUrl;
+                            localStorage.setItem('wf_user', JSON.stringify(parsed));
+                        } catch {}
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Failed to upload avatar in Desktop', err);
+        } finally {
+            setUploadingAvatar(false);
+        }
+    };
 
     if (!isOpen) return null;
 
+    const userName = dynamicProfile.userName || initialUserName;
+    const avatarUrl = dynamicProfile.avatarUrl ?? initialAvatarUrl;
+    const email = dynamicProfile.email || initialEmail;
+    const teamName = dynamicProfile.teamName || initialTeamName;
+    const role = dynamicProfile.role || initialRole;
+    const designation = dynamicProfile.designation || initialDesignation;
+    const idleThresholdSecs = dynamicProfile.idleThresholdSecs || initialIdleThresholdSecs;
     const fullAvatar = getFullAvatarUrl(avatarUrl);
 
     return (
@@ -60,13 +157,42 @@ export default function ProfileDrawer({
                 <div className="profile-modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
                     {/* Identity Hero */}
                     <div className="profile-identity-card">
-                        <div className="profile-avatar-large">
+                        <label
+                            className="profile-avatar-large"
+                            style={{ position: 'relative', cursor: 'pointer', display: 'inline-block' }}
+                            title="Click to upload/change profile picture"
+                        >
+                            <input
+                                type="file"
+                                accept="image/*"
+                                style={{ display: 'none' }}
+                                disabled={uploadingAvatar}
+                                onChange={handleAvatarUpload}
+                            />
                             {fullAvatar ? (
-                                <img src={fullAvatar} alt={userName} className="profile-img-lg" />
+                                <img src={fullAvatar} alt={userName} className="profile-img-lg" style={{ width: '64px', height: '64px', borderRadius: '16px', objectFit: 'cover' }} />
                             ) : (
                                 <div className="profile-placeholder-lg">{userName.charAt(0).toUpperCase()}</div>
                             )}
-                        </div>
+                            <div
+                                style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    background: 'rgba(0,0,0,0.45)',
+                                    borderRadius: '16px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    opacity: uploadingAvatar ? 1 : 0,
+                                    transition: 'opacity 0.2s ease',
+                                }}
+                                className="avatar-hover-overlay"
+                            >
+                                <span style={{ color: '#fff', fontSize: '10px', fontWeight: 700 }}>
+                                    {uploadingAvatar ? '...' : 'Change'}
+                                </span>
+                            </div>
+                        </label>
                         <div className="profile-identity-info">
                             <h3 className="profile-fullname">{userName}</h3>
                             <div className="profile-badge-role">{designation}</div>

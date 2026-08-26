@@ -4,12 +4,19 @@ import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Titlebar from './components/Titlebar';
 import { API_BASE } from './config';
+import { subscribeToProfileEvents } from './api';
 
 interface User {
     id: string;
     name: string;
     email: string;
     avatarUrl?: string | null;
+    role?: string;
+    roleName?: string;
+    designation?: string;
+    teamId?: string | null;
+    teamName?: string | null;
+    idleThresholdSecs?: number;
 }
 
 function getSavedUser(): User | null {
@@ -23,7 +30,18 @@ function getSavedUser(): User | null {
             typeof parsed.name === 'string' &&
             typeof parsed.email === 'string'
         ) {
-            return { id: parsed.id, name: parsed.name, email: parsed.email, avatarUrl: parsed.avatarUrl };
+            return {
+                id: parsed.id,
+                name: parsed.name,
+                email: parsed.email,
+                avatarUrl: parsed.avatarUrl,
+                role: parsed.role || parsed.designation || 'Employee',
+                roleName: parsed.roleName || parsed.role || 'Employee',
+                designation: parsed.designation || parsed.role || 'Employee',
+                teamId: parsed.teamId ?? null,
+                teamName: parsed.teamName ?? null,
+                idleThresholdSecs: parsed.idleThresholdSecs,
+            };
         }
         return null;
     } catch {
@@ -169,24 +187,53 @@ function App() {
         return () => window.removeEventListener('wf:session-expired', onExpired);
     }, []);
 
-    // Sync latest user profile (avatarUrl, name, etc.) from backend
+    // Live Server-Sent Events listener: real-time updates when admin changes role/team/name
     useEffect(() => {
         if (!token) return;
-        fetch(`${API_BASE}/auth/me`, {
-            headers: { Authorization: `Bearer ${token}` }
-        })
-            .then(res => {
-                if (res.ok) return res.json();
-                return null;
+        const unsubscribe = subscribeToProfileEvents((updatedProfile) => {
+            console.log('[App] Received live SSE user-profile-updated:', updatedProfile);
+            setUser(prev => {
+                const merged = { ...(prev || {}), ...updatedProfile } as User;
+                localStorage.setItem('wf_user', JSON.stringify(merged));
+                return merged;
+            });
+        });
+        return unsubscribe;
+    }, [token]);
+
+    // Sync latest user profile from backend on mount, window focus, and periodic interval
+    useEffect(() => {
+        if (!token) return;
+        const fetchLatestProfile = () => {
+            fetch(`${API_BASE}/auth/me`, {
+                headers: { Authorization: `Bearer ${token}` }
             })
-            .then(data => {
-                if (data?.user) {
-                    console.log('[App] Fetched user profile from /auth/me:', data.user);
-                    setUser(prev => ({ ...(prev || {}), ...data.user }));
-                    localStorage.setItem('wf_user', JSON.stringify(data.user));
-                }
-            })
-            .catch(err => console.error('[App] Failed to fetch /auth/me:', err));
+                .then(res => {
+                    if (res.ok) return res.json();
+                    return null;
+                })
+                .then(data => {
+                    if (data?.user) {
+                        console.log('[App] Synced user profile from /auth/me:', data.user);
+                        setUser(prev => {
+                            const merged = { ...(prev || {}), ...data.user };
+                            localStorage.setItem('wf_user', JSON.stringify(merged));
+                            return merged;
+                        });
+                    }
+                })
+                .catch(err => console.error('[App] Failed to fetch /auth/me:', err));
+        };
+
+        fetchLatestProfile();
+
+        window.addEventListener('focus', fetchLatestProfile);
+        const interval = setInterval(fetchLatestProfile, 60_000);
+
+        return () => {
+            window.removeEventListener('focus', fetchLatestProfile);
+            clearInterval(interval);
+        };
     }, [token]);
 
     const handleLogin = (u: User, t: string) => {
@@ -213,10 +260,23 @@ function App() {
         );
     }
 
+    const effectiveRole = user.role || user.roleName || user.designation || 'Employee';
+    const effectiveTeam = user.teamName || 'General Team';
+
     return (
         <>
             <Titlebar />
-            <Dashboard view="tracker" onLogout={handleLogout} userName={user.name} avatarUrl={user.avatarUrl} />
+            <Dashboard
+                view="tracker"
+                onLogout={handleLogout}
+                userName={user.name}
+                avatarUrl={user.avatarUrl}
+                email={user.email}
+                role={effectiveRole}
+                designation={effectiveRole}
+                teamName={effectiveTeam}
+                idleThresholdSecs={user.idleThresholdSecs}
+            />
 
             {version && (
                 <div className="footer">
