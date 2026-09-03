@@ -3123,13 +3123,13 @@ body.overtime-modal-open {
   margin-bottom: 14px;
 }
 
-/* ── 2 Action Cards Row (1-click Break/Unbreak + Clock Out) ── */
+/* ── 3 Action Cards Row ── */
 .tracker-actions-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
   width: 100%;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .tracker-action-card {

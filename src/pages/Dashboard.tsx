@@ -20,6 +20,7 @@ import {
     Lock,
     LogOut,
     Play,
+    SlidersHorizontal,
 } from 'lucide-react';
 
 import { useTimer, formatDuration } from '../hooks/useTimer';
@@ -172,26 +173,8 @@ export default function Dashboard({
                             {greeting},{' '}
                             <span className="tracker-greeting-name">{userName}</span>
                         </div>
-                        <div className="tracker-greeting-sub" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
-                            <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '1px 8px',
-                                borderRadius: '999px',
-                                fontSize: '11px',
-                                fontWeight: 700,
-                                background: '#f0fdf4',
-                                color: '#166534',
-                                border: '1px solid #bbf7d0',
-                                letterSpacing: '0.02em',
-                            }}>
-                                {role || designation || 'Employee'}
-                            </span>
-                            {teamName && (
-                                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600 }}>
-                                    • {teamName}
-                                </span>
-                            )}
+                        <div className="tracker-greeting-sub">
+                            Have a productive day ahead!
                         </div>
                     </div>
 
@@ -240,7 +223,7 @@ export default function Dashboard({
                     ) : status === 'on_break' ? (
                         <div className="tracker-status-pill tracker-pill-break">
                             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b' }} />
-                            <span>ON BREAK • {formatDuration(currentBreakSecs)}</span>
+                            <span>ON BREAK</span>
                         </div>
                     ) : (
                         <div className="tracker-status-pill tracker-pill-stopped">
@@ -259,7 +242,7 @@ export default function Dashboard({
                         {status === 'working'
                             ? 'Shift in progress. Stay productive!'
                             : status === 'on_break'
-                            ? `On rest break (${formatDuration(currentBreakSecs)}). Click Resume to unbreak.`
+                            ? 'On rest break. Recharge yourself!'
                             : 'Shift not started. Ready to begin workday.'}
                     </div>
 
@@ -280,119 +263,97 @@ export default function Dashboard({
                         </div>
                     )}
 
-                    {/* ── 2 Action Cards (1-Click Break / Unbreak & Clock Out) ── */}
+                    {/* ── 3 Action Cards (Working & Break States) ── */}
                     {status === 'working' && (
-                        <>
-                            <div className="tracker-actions-grid">
-                                {/* Button 1: Take Break (1 Click to Break) */}
-                                <button
-                                    type="button"
-                                    onClick={() => handleBreak()}
-                                    disabled={actionLoading || breakLimitReached}
-                                    className="tracker-action-card card-break"
-                                >
-                                    <div className="tracker-card-icon-wrap">
-                                        <Coffee size={18} />
-                                    </div>
-                                    <span className="tracker-card-title">
-                                        {breakLimitReached ? 'Max Breaks' : 'Take Break'}
-                                    </span>
-                                    <span className="tracker-card-desc">Click to start break</span>
-                                </button>
+                        <div className="tracker-actions-grid">
+                            {/* Card 1: Manage Breaks */}
+                            <button
+                                type="button"
+                                onClick={() => setShowManageBreaksModal(true)}
+                                className="tracker-action-card card-manage"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <SlidersHorizontal size={16} />
+                                </div>
+                                <span className="tracker-card-title">Manage Breaks</span>
+                                <span className="tracker-card-desc">View & claim</span>
+                            </button>
 
-                                {/* Button 2: Clock Out */}
-                                <button
-                                    type="button"
-                                    onClick={handleCheckoutClick}
-                                    disabled={actionLoading || proceedingStop}
-                                    className="tracker-action-card card-clockout"
-                                >
-                                    <div className="tracker-card-icon-wrap">
-                                        <LogOut size={18} />
-                                    </div>
-                                    <span className="tracker-card-title">Clock Out</span>
-                                    <span className="tracker-card-desc">End your shift</span>
-                                </button>
-                            </div>
+                            {/* Card 2: Take Break */}
+                            <button
+                                type="button"
+                                onClick={() => handleBreak()}
+                                disabled={actionLoading || breakLimitReached}
+                                className="tracker-action-card card-break"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <Coffee size={16} />
+                                </div>
+                                <span className="tracker-card-title">
+                                    {breakLimitReached ? 'Max Breaks' : 'Take Break'}
+                                </span>
+                                <span className="tracker-card-desc">Start rest break</span>
+                            </button>
 
-                            {/* Secondary Link for Manage / Claim Breaks */}
-                            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '11px', color: '#64748b' }}>
-                                <span>Breaks: <strong>{todayBreaksCount}</strong>/{maxBreaks}</span>
-                                <span>•</span>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowManageBreaksModal(true)}
-                                    style={{
-                                        background: 'none',
-                                        border: 'none',
-                                        padding: 0,
-                                        color: '#2563eb',
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        fontSize: '11px',
-                                        textDecoration: 'underline'
-                                    }}
-                                >
-                                    Manage & Claims
-                                </button>
-                            </div>
-                        </>
+                            {/* Card 3: Clock Out */}
+                            <button
+                                type="button"
+                                onClick={handleCheckoutClick}
+                                disabled={actionLoading || proceedingStop}
+                                className="tracker-action-card card-clockout"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <LogOut size={16} />
+                                </div>
+                                <span className="tracker-card-title">Clock Out</span>
+                                <span className="tracker-card-desc">End your shift</span>
+                            </button>
+                        </div>
                     )}
 
                     {status === 'on_break' && (
-                        <>
-                            <div className="tracker-actions-grid">
-                                {/* Button 1: Resume Work (1 Click to Unbreak) */}
-                                <button
-                                    type="button"
-                                    onClick={() => handleBreak()}
-                                    disabled={actionLoading}
-                                    className="tracker-action-card card-resume"
-                                >
-                                    <div className="tracker-card-icon-wrap">
-                                        <Play size={18} fill="currentColor" />
-                                    </div>
-                                    <span className="tracker-card-title">Resume Work</span>
-                                    <span className="tracker-card-desc">Click to unbreak</span>
-                                </button>
+                        <div className="tracker-actions-grid">
+                            {/* Card 1: Manage Breaks */}
+                            <button
+                                type="button"
+                                onClick={() => setShowManageBreaksModal(true)}
+                                className="tracker-action-card card-manage"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <SlidersHorizontal size={16} />
+                                </div>
+                                <span className="tracker-card-title">Manage Breaks</span>
+                                <span className="tracker-card-desc">View & claim</span>
+                            </button>
 
-                                {/* Button 2: Clock Out */}
-                                <button
-                                    type="button"
-                                    onClick={handleCheckoutClick}
-                                    disabled={actionLoading || proceedingStop}
-                                    className="tracker-action-card card-clockout"
-                                >
-                                    <div className="tracker-card-icon-wrap">
-                                        <LogOut size={18} />
-                                    </div>
-                                    <span className="tracker-card-title">Clock Out</span>
-                                    <span className="tracker-card-desc">End your shift</span>
-                                </button>
-                            </div>
+                            {/* Card 2: Resume Work */}
+                            <button
+                                type="button"
+                                onClick={() => handleBreak()}
+                                disabled={actionLoading}
+                                className="tracker-action-card card-resume"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <Play size={16} fill="currentColor" />
+                                </div>
+                                <span className="tracker-card-title">Resume Work</span>
+                                <span className="tracker-card-desc">Continue shift</span>
+                            </button>
 
-                            {/* Secondary Link for Manage / Claim Breaks */}
-                            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '11px', color: '#64748b' }}>
-                                <span>Current: <strong>{formatDuration(currentBreakSecs)}</strong></span>
-                                <span>•</span>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowManageBreaksModal(true)}
-                                    style={{
-                                        background: 'none',
-                                        border: 'none',
-                                        padding: 0,
-                                        color: '#2563eb',
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        fontSize: '11px',
-                                        textDecoration: 'underline'
-                                    }}
-                                >
-                                    Manage & Claims
-                                </button>
-                            </div>
-                        </>
+                            {/* Card 3: Clock Out */}
+                            <button
+                                type="button"
+                                onClick={handleCheckoutClick}
+                                disabled={actionLoading || proceedingStop}
+                                className="tracker-action-card card-clockout"
+                            >
+                                <div className="tracker-card-icon-wrap">
+                                    <LogOut size={16} />
+                                </div>
+                                <span className="tracker-card-title">Clock Out</span>
+                                <span className="tracker-card-desc">End your shift</span>
+                            </button>
+                        </div>
                     )}
 
                     {status === 'stopped' && (
