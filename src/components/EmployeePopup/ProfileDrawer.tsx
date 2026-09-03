@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { CalendarDays, Palmtree } from 'lucide-react';
 import { getFullAvatarUrl } from './EmployeeHeader';
 import { getLeaveBalance, type LeaveBalanceInfo } from '../../api';
 import { API_BASE } from '../../config';
@@ -225,8 +224,7 @@ export default function ProfileDrawer({
                                 }}
                                 className="profile-service-btn"
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#16a34a', fontWeight: 800, fontSize: '12px' }}>
-                                    <Palmtree size={15} />
+                                <div style={{ color: '#16a34a', fontWeight: 800, fontSize: '12px' }}>
                                     <span>Leaves & Quota</span>
                                 </div>
                                 <div style={{ fontSize: '10.5px', color: '#15803d', fontWeight: 600, marginTop: '3px' }}>
@@ -255,8 +253,7 @@ export default function ProfileDrawer({
                                 }}
                                 className="profile-service-btn"
                             >
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#2563eb', fontWeight: 800, fontSize: '12px' }}>
-                                    <CalendarDays size={15} />
+                                <div style={{ color: '#2563eb', fontWeight: 800, fontSize: '12px' }}>
                                     <span>Holiday Calendar</span>
                                 </div>
                                 <div style={{ fontSize: '10.5px', color: '#1d4ed8', fontWeight: 600, marginTop: '3px' }}>
