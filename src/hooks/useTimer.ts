@@ -858,13 +858,61 @@ export function useTimer() {
             breakReminderRepeatSecs
         });
 
-        (api as any).updateShiftStatus(
+        api.updateShiftStatus(
             status,
             activeBreakStartTime,
             breakReminderAfterSecs,
             breakReminderRepeatSecs
         );
     }, [status, activeBreak?.startTime, breakReminderAfterSecs, breakReminderRepeatSecs]);
+
+    // ── Overtime status sync to Electron main process ──────────────────────────
+    // Keep main.js informed on every tick/stat update so it can trigger the native
+    // Overtime Prompt window as soon as target work and break hours are met.
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api?.updateOvertimeStatus) return;
+
+        api.updateOvertimeStatus({
+            status,
+            workLocation: currentShift?.workLocation ?? 'office',
+            currentShiftId: currentShift?.id ?? null,
+            overtimeAccepted: currentShift?.overtimeAccepted === true || isOvertimeActive,
+            todayWorked,
+            todayBreakSecs,
+            workTargetSecs: expectedWorkSecs,
+            breakTargetSecs: expectedBreakSecs,
+        });
+    }, [
+        status,
+        currentShift?.workLocation,
+        currentShift?.id,
+        currentShift?.overtimeAccepted,
+        isOvertimeActive,
+        todayWorked,
+        todayBreakSecs,
+        expectedWorkSecs,
+        expectedBreakSecs,
+    ]);
+
+    // ── Overtime Prompt action listeners from Electron ─────────────────────────
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api?.onOvertimePromptYes) return;
+
+        api.onOvertimePromptYes(async () => {
+            console.log('[Overtime] User confirmed start overtime from prompt window');
+            await handleStartOvertime();
+        });
+
+        api.onOvertimePromptNo?.(() => {
+            console.log('[Overtime] User declined overtime from prompt window');
+        });
+
+        return () => {
+            api.removeOvertimePromptListeners?.();
+        };
+    }, [handleStartOvertime]);
 
     // Suppress unused variable warning — tick is only used to trigger re-renders
     void tick;
